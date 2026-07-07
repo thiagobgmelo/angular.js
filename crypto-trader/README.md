@@ -9,6 +9,10 @@ loss, alvos de lucro (TP1/TP2/TP3) e tamanho de posição — com execução sim
 > ⚠️ **Aviso**: projeto educacional. Não é recomendação de investimento. O modo
 > de operação é 100% simulado (paper trading) — nenhuma ordem real é enviada.
 
+📚 **Documentação completa em [`docs/`](docs/README.md)**: visão e
+planejamento, decisões de arquitetura (ADRs) com os porquês, histórico de
+ajustes e o funcionamento detalhado da plataforma.
+
 ## Ferramentas conectadas
 
 | Ferramenta | Papel |
