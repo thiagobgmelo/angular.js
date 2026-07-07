@@ -1,9 +1,7 @@
 """API REST (FastAPI) + arquivos estáticos do dashboard."""
 from __future__ import annotations
 
-from pathlib import Path
-
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -18,6 +16,17 @@ app = FastAPI(title="Crypto Trader", version="1.0")
 _cfg = load_config()
 _scanner = Scanner(_cfg)
 
+_ALLOWED_PAIRS: set[str] = set(_cfg.get("market.pairs", []))
+_ALLOWED_TIMEFRAMES: set[str] = set(_cfg.get("market.timeframes", []))
+
+
+def _validate_market(symbol: str, timeframe: str) -> None:
+    """Restringe aos pares/timeframes do config (o que o dashboard oferece)."""
+    if symbol not in _ALLOWED_PAIRS:
+        raise HTTPException(status_code=422, detail=f"Par não configurado: {symbol!r}")
+    if timeframe not in _ALLOWED_TIMEFRAMES:
+        raise HTTPException(status_code=422, detail=f"Timeframe não configurado: {timeframe!r}")
+
 
 @app.get("/api/config")
 def get_config():
@@ -29,11 +38,16 @@ def get_config():
 
 
 @app.get("/api/ohlcv")
-def get_ohlcv(symbol: str = "BTC/USDT", timeframe: str = "4h", limit: int = 300):
+def get_ohlcv(
+    symbol: str = "BTC/USDT",
+    timeframe: str = "4h",
+    limit: int = Query(default=300, ge=10, le=1000),
+):
+    _validate_market(symbol, timeframe)
     try:
         df = _scanner.client.fetch_ohlcv(symbol, timeframe, limit=limit)
     except Exception as err:
-        raise HTTPException(status_code=502, detail=f"Erro ao buscar dados: {err}")
+        raise HTTPException(status_code=502, detail=f"Erro ao buscar dados: {err}") from err
     scfg = _cfg.get("strategy", {})
     df = indicators.enrich(df, scfg)
     out = []
@@ -56,12 +70,13 @@ def get_ohlcv(symbol: str = "BTC/USDT", timeframe: str = "4h", limit: int = 300)
 @app.get("/api/analysis")
 def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "4h"):
     """Análise ao vivo do par: contexto completo + sinal se houver."""
+    _validate_market(symbol, timeframe)
     try:
         df = _scanner.client.fetch_ohlcv(
             symbol, timeframe, limit=_cfg.get("market.candles", 400)
         )
     except Exception as err:
-        raise HTTPException(status_code=502, detail=f"Erro ao buscar dados: {err}")
+        raise HTTPException(status_code=502, detail=f"Erro ao buscar dados: {err}") from err
     signal, context = strategy.analyze(
         df.iloc[:-1], symbol, timeframe, _cfg.get("strategy", {})
     )
@@ -73,7 +88,7 @@ def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "4h"):
 
 
 @app.get("/api/signals")
-def get_signals(limit: int = 50):
+def get_signals(limit: int = Query(default=50, ge=1, le=500)):
     return _scanner.store.recent_signals(limit)
 
 
@@ -94,11 +109,16 @@ def run_scan():
 
 
 @app.get("/api/backtest")
-def run_backtest(symbol: str = "BTC/USDT", timeframe: str = "4h", candles: int = 1500):
+def run_backtest(
+    symbol: str = "BTC/USDT",
+    timeframe: str = "4h",
+    candles: int = Query(default=1500, ge=300, le=5000),
+):
+    _validate_market(symbol, timeframe)
     try:
         df = _scanner.client.fetch_ohlcv_history(symbol, timeframe, total=candles)
     except Exception as err:
-        raise HTTPException(status_code=502, detail=f"Erro ao buscar histórico: {err}")
+        raise HTTPException(status_code=502, detail=f"Erro ao buscar histórico: {err}") from err
     if len(df) < 300:
         raise HTTPException(status_code=422, detail="Histórico insuficiente para backtest")
     return engine.run(

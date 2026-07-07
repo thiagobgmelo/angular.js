@@ -1,4 +1,3 @@
-import numpy as np
 
 from app.analysis import levels
 from tests.conftest import make_ohlcv

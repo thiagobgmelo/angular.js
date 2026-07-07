@@ -96,15 +96,31 @@ Tudo em [`config.yaml`](config.yaml): exchange, pares, timeframes, parâmetros d
 estratégia (períodos, limiar de score, R:R mínimo) e risco (capital, % por
 trade, máx. de posições).
 
-## Testes
+## Segurança
+
+- O servidor escuta **somente em `127.0.0.1`** por padrão. Para expor na rede
+  (`HOST=0.0.0.0 python -m app.main serve`), saiba que a API não tem
+  autenticação e possui um endpoint mutável (`POST /api/scan`) — faça isso
+  apenas em rede confiável ou atrás de um reverse proxy com autenticação.
+- Parâmetros da API são validados: `symbol`/`timeframe` restritos aos valores
+  do `config.yaml` e limites numéricos com faixas máximas.
+- O front escapa todo conteúdo dinâmico antes de renderizar (anti-XSS), e as
+  mensagens do Telegram usam `html.escape`.
+- Segredos (token do Telegram) ficam no `.env`, que está no `.gitignore`.
+- Nenhuma chave de exchange é necessária: o sistema só lê dados públicos e
+  nunca envia ordens reais.
+
+## Qualidade
 
 ```bash
-python -m pytest tests/
+python -m pytest tests/   # 38 testes
+ruff check .              # lint + regras de segurança (flake8-bandit)
 ```
 
-34 testes cobrem indicadores (valores de referência), níveis/estrutura,
-estratégia (cenários sintéticos de tendência), risk manager e ciclo completo do
-paper trading (TP1 → breakeven → TP2 → TP3 / stop).
+Os testes cobrem indicadores (valores de referência), níveis/estrutura,
+estratégia (cenários sintéticos de tendência), risk manager, ciclo completo do
+paper trading (TP1 → breakeven → TP2 → TP3 / stop) e o motor de backtest
+(contabilidade, limite de perda por trade e métricas).
 
 ## Estrutura
 

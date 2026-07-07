@@ -99,6 +99,17 @@ def test_short_position_cycle(portfolio):
     assert abs(pos["realized_pnl"] - 75.0) < 1e-9  # (100-92.5)*10
 
 
+def test_checked_until_marker_single_and_updated(portfolio):
+    """O marcador de idempotência é único e sempre reflete o último candle."""
+    pos = open_pos(portfolio)
+    ts1, ts2 = "2024-01-02T00:00:00+00:00", "2024-01-02T04:00:00+00:00"
+    pos = portfolio.update_with_candle(pos, high=101.0, low=99.0, candle_ts=ts1)
+    pos = portfolio.update_with_candle(pos, high=101.0, low=99.0, candle_ts=ts2)
+    markers = [e for e in pos["events"] if e["type"] == "checked_until"]
+    assert len(markers) == 1
+    assert markers[0]["ts"] == "2024-01-02T04:00:00+00:00"
+
+
 def test_summary_metrics(portfolio):
     pos = open_pos(portfolio)
     portfolio.update_with_candle(pos, high=101.0, low=94.0)  # stop

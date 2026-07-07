@@ -113,12 +113,16 @@ def analyze(
     if at_support or (near_fib and structure == "uptrend"):
         long_score += 1
         long_why.append(
-            "Preço testando zona de suporte" if at_support else "Preço em retração de Fibonacci na tendência de alta"
+            "Preço testando zona de suporte"
+            if at_support
+            else "Preço em retração de Fibonacci na tendência de alta"
         )
     if at_resistance or (near_fib and structure == "downtrend"):
         short_score += 1
         short_why.append(
-            "Preço testando zona de resistência" if at_resistance else "Preço em retração de Fibonacci na tendência de baixa"
+            "Preço testando zona de resistência"
+            if at_resistance
+            else "Preço em retração de Fibonacci na tendência de baixa"
         )
 
     # 6. Padrão de candle (vale mais quando em zona relevante)
@@ -126,10 +130,12 @@ def analyze(
     bearish_pattern = patterns.BEARISH.intersection(candle_patterns)
     if bullish_pattern and (at_support or near_fib or rsi_val <= 40):
         long_score += 1
-        long_why.append(f"Padrão de reversão de alta ({', '.join(bullish_pattern)}) em região de interesse")
+        names = ", ".join(bullish_pattern)
+        long_why.append(f"Padrão de reversão de alta ({names}) em região de interesse")
     if bearish_pattern and (at_resistance or near_fib or rsi_val >= 60):
         short_score += 1
-        short_why.append(f"Padrão de reversão de baixa ({', '.join(bearish_pattern)}) em região de interesse")
+        names = ", ".join(bearish_pattern)
+        short_why.append(f"Padrão de reversão de baixa ({names}) em região de interesse")
 
     # 7. Volume confirmando o último candle
     if pd.notna(last["volume_ma"]) and last["volume"] > last["volume_ma"]:

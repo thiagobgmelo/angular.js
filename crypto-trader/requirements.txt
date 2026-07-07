@@ -1,8 +1,11 @@
-ccxt>=4.0
-pandas>=2.0
-numpy>=1.26
-fastapi>=0.110
-uvicorn[standard]>=0.29
-PyYAML>=6.0
-pytest>=8.0
-httpx>=0.27
+# Versões exatas testadas (gerado a partir de requirements.in)
+# Para atualizar: ajuste os ranges em requirements.in, reinstale e congele aqui.
+ccxt==4.5.64
+pandas==3.0.3
+numpy==2.4.6
+fastapi==0.139.0
+uvicorn[standard]==0.50.2
+PyYAML==6.0.1
+pytest==9.1.1
+httpx==0.28.1
+ruff==0.15.20

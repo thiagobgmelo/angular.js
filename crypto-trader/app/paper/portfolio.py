@@ -10,7 +10,7 @@ se stop e alvo saem no mesmo candle, assume que o STOP veio primeiro.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .store import Store
 
@@ -19,7 +19,7 @@ TP2_FRACTION = 0.25
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class PaperPortfolio:
@@ -42,12 +42,18 @@ class PaperPortfolio:
     def closed_positions(self) -> list[dict]:
         return self.store.positions(status="closed")
 
-    def update_with_candle(self, pos: dict, high: float, low: float) -> dict:
-        """Processa um candle contra uma posição aberta. Retorna a posição atualizada."""
+    def update_with_candle(
+        self, pos: dict, high: float, low: float, candle_ts: str | None = None
+    ) -> dict:
+        """Processa um candle contra uma posição aberta. Retorna a posição atualizada.
+
+        `candle_ts` (ISO) é gravado como marcador `checked_until` nos eventos,
+        permitindo ao chamador pular candles já processados (idempotência).
+        """
         direction = pos["direction"]
         entry, stop = pos["entry"], pos["stop"]
         tp1, tp2, tp3 = pos["targets"][:3]
-        events: list = list(pos["events"])
+        events: list = [e for e in pos["events"] if e.get("type") != "checked_until"]
         remaining = pos["remaining_size"]
         realized = pos["realized_pnl"]
         is_long = direction == "long"
@@ -65,7 +71,9 @@ class PaperPortfolio:
         # conservador: stop primeiro
         if hit_stop():
             realized += pnl(stop, remaining)
-            events.append({"at": _now(), "type": "stop" if "tp1" not in [e.get("type") for e in events] else "stop_breakeven", "price": stop})
+            past = {e.get("type") for e in events}
+            stop_kind = "stop_breakeven" if "tp1" in past else "stop"
+            events.append({"at": _now(), "type": stop_kind, "price": stop})
             remaining = 0.0
             done = True
         else:
@@ -91,6 +99,8 @@ class PaperPortfolio:
                 events.append({"at": _now(), "type": "tp3", "price": tp3})
                 done = True
 
+        if candle_ts is not None:
+            events.append({"type": "checked_until", "ts": candle_ts})
         fields: dict = {
             "remaining_size": remaining,
             "realized_pnl": realized,

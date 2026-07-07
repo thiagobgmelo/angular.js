@@ -41,7 +41,35 @@ class Config:
         return node
 
 
+def validate(cfg: Config) -> None:
+    """Falha cedo com mensagem clara para configuração sem sentido."""
+    problems: list[str] = []
+    if not cfg.get("market.pairs"):
+        problems.append("market.pairs não pode ser vazio")
+    if not cfg.get("market.timeframes"):
+        problems.append("market.timeframes não pode ser vazio")
+    risk = cfg.get("risk.risk_per_trade", 0.01)
+    if not 0 < risk <= 0.1:
+        problems.append(f"risk.risk_per_trade deve estar em (0, 0.1]; recebido {risk}")
+    equity = cfg.get("risk.account_equity", 10000)
+    if equity <= 0:
+        problems.append(f"risk.account_equity deve ser positivo; recebido {equity}")
+    rr = cfg.get("strategy.min_risk_reward", 1.5)
+    if rr < 1:
+        problems.append(f"strategy.min_risk_reward deve ser >= 1; recebido {rr}")
+    candles = cfg.get("market.candles", 400)
+    if not 60 <= candles <= 1000:
+        problems.append(f"market.candles deve estar em [60, 1000]; recebido {candles}")
+    max_pos = cfg.get("risk.max_open_positions", 5)
+    if max_pos < 1:
+        problems.append(f"risk.max_open_positions deve ser >= 1; recebido {max_pos}")
+    if problems:
+        raise ValueError("Configuração inválida:\n  - " + "\n  - ".join(problems))
+
+
 def load_config(path: Path = CONFIG_PATH) -> Config:
     _load_env()
     with open(path) as fh:
-        return Config(yaml.safe_load(fh))
+        cfg = Config(yaml.safe_load(fh))
+    validate(cfg)
+    return cfg

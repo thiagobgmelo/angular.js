@@ -32,6 +32,16 @@ class BacktestTrade:
     events: list[str] = field(default_factory=list)
 
 
+def _trade_pnl(trade: BacktestTrade, price: float, frac: float, is_long: bool) -> float:
+    units = trade.size * frac
+    delta = price - trade.entry if is_long else trade.entry - price
+    return delta * units
+
+
+def _hit(candle: pd.Series, level: float, is_long: bool) -> bool:
+    return candle["high"] >= level if is_long else candle["low"] <= level
+
+
 def run(
     df: pd.DataFrame,
     symbol: str,
@@ -42,7 +52,11 @@ def run(
     warmup: int = 250,
     step: int = 1,
 ) -> dict:
-    rm = RiskManager(risk_per_trade=risk_per_trade, min_risk_reward=cfg.get("min_risk_reward", 1.5), max_open_positions=1)
+    rm = RiskManager(
+        risk_per_trade=risk_per_trade,
+        min_risk_reward=cfg.get("min_risk_reward", 1.5),
+        max_open_positions=1,
+    )
     equity = initial_equity
     trades: list[BacktestTrade] = []
     open_trade: BacktestTrade | None = None
@@ -60,17 +74,10 @@ def run(
             remaining_frac = 1.0 - (TP1_FRACTION if "tp1" in tp_state else 0) - (
                 TP2_FRACTION if "tp2" in tp_state else 0
             )
-
-            def pnl(price: float, frac: float) -> float:
-                units = open_trade.size * frac
-                return (price - open_trade.entry) * units if is_long else (open_trade.entry - price) * units
-
             hit_stop = candle["low"] <= stop if is_long else candle["high"] >= stop
-            def hit(level: float) -> bool:
-                return candle["high"] >= level if is_long else candle["low"] <= level
 
             if hit_stop:
-                open_trade.pnl += pnl(stop, remaining_frac)
+                open_trade.pnl += _trade_pnl(open_trade, stop, remaining_frac, is_long)
                 open_trade.exit_reason = "stop" if "tp1" not in tp_state else "stop_breakeven"
                 open_trade.closed_at = ts
                 equity += open_trade.pnl
@@ -78,18 +85,18 @@ def run(
                 equity_curve.append((ts, equity))
                 open_trade, tp_state = None, set()
             else:
-                if "tp1" not in tp_state and hit(tp1):
-                    open_trade.pnl += pnl(tp1, TP1_FRACTION)
+                if "tp1" not in tp_state and _hit(candle, tp1, is_long):
+                    open_trade.pnl += _trade_pnl(open_trade, tp1, TP1_FRACTION, is_long)
                     open_trade.stop = open_trade.entry
                     open_trade.events.append("tp1+breakeven")
                     tp_state.add("tp1")
-                if "tp1" in tp_state and "tp2" not in tp_state and hit(tp2):
-                    open_trade.pnl += pnl(tp2, TP2_FRACTION)
+                if "tp1" in tp_state and "tp2" not in tp_state and _hit(candle, tp2, is_long):
+                    open_trade.pnl += _trade_pnl(open_trade, tp2, TP2_FRACTION, is_long)
                     open_trade.events.append("tp2")
                     tp_state.add("tp2")
-                if "tp2" in tp_state and hit(tp3):
+                if "tp2" in tp_state and _hit(candle, tp3, is_long):
                     frac = 1.0 - TP1_FRACTION - TP2_FRACTION
-                    open_trade.pnl += pnl(tp3, frac)
+                    open_trade.pnl += _trade_pnl(open_trade, tp3, frac, is_long)
                     open_trade.exit_reason = "tp3"
                     open_trade.closed_at = ts
                     equity += open_trade.pnl
@@ -121,8 +128,7 @@ def run(
         remaining_frac = 1.0 - (TP1_FRACTION if "tp1" in tp_state else 0) - (
             TP2_FRACTION if "tp2" in tp_state else 0
         )
-        units = open_trade.size * remaining_frac
-        open_trade.pnl += (last_close - open_trade.entry) * units if is_long else (open_trade.entry - last_close) * units
+        open_trade.pnl += _trade_pnl(open_trade, last_close, remaining_frac, is_long)
         open_trade.exit_reason = "end_of_data"
         open_trade.closed_at = str(df.index[-1])
         equity += open_trade.pnl

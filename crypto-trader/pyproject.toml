@@ -1,0 +1,23 @@
+[project]
+name = "crypto-trader"
+version = "1.0.0"
+description = "Sistema de trading de criptomoedas: análise técnica, sinais e paper trading"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# E/W: pycodestyle · F: pyflakes · I: isort · UP: pyupgrade
+# B: bugbear · S: flake8-bandit (segurança)
+select = ["E", "F", "W", "I", "UP", "B", "S"]
+ignore = [
+    "S311",  # random não-criptográfico: usado só no provedor demo de dados
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]  # assert é a ferramenta do pytest
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

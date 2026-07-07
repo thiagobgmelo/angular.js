@@ -21,17 +21,17 @@ def swing_points(df: pd.DataFrame, lookback: int = 5) -> tuple[pd.Series, pd.Ser
     Retorna (highs, lows) como Series esparsas indexadas pelo timestamp do pivô.
     """
     highs, lows = {}, {}
-    h, l = df["high"].values, df["low"].values
+    hi, lo = df["high"].values, df["low"].values
     n = len(df)
     for i in range(lookback, n - lookback):
-        window_h = h[i - lookback : i + lookback + 1]
-        window_l = l[i - lookback : i + lookback + 1]
+        window_h = hi[i - lookback : i + lookback + 1]
+        window_l = lo[i - lookback : i + lookback + 1]
         # empates (ex.: abertura igual ao fechamento anterior) contam uma única
         # vez: o pivô é a primeira ocorrência do extremo dentro da janela
-        if h[i] == window_h.max() and window_h.argmax() == lookback:
-            highs[df.index[i]] = h[i]
-        if l[i] == window_l.min() and window_l.argmin() == lookback:
-            lows[df.index[i]] = l[i]
+        if hi[i] == window_h.max() and window_h.argmax() == lookback:
+            highs[df.index[i]] = hi[i]
+        if lo[i] == window_l.min() and window_l.argmin() == lookback:
+            lows[df.index[i]] = lo[i]
     return pd.Series(highs, dtype=float), pd.Series(lows, dtype=float)
 
 

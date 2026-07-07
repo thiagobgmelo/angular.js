@@ -5,6 +5,7 @@ offline (testes, demonstração do dashboard, ambientes sem acesso à exchange).
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
 import zlib
@@ -12,6 +13,8 @@ import zlib
 import ccxt
 import numpy as np
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 OHLCV_COLUMNS = ["timestamp", "open", "high", "low", "close", "volume"]
 
@@ -48,6 +51,10 @@ class ExchangeClient:
                 break
             except (ccxt.NetworkError, ccxt.ExchangeNotAvailable) as err:
                 last_err = err
+                log.warning(
+                    "%s %s: falha de rede (tentativa %d/%d): %s",
+                    symbol, timeframe, attempt + 1, retries, err,
+                )
                 time.sleep(2**attempt)
         else:
             raise ConnectionError(
@@ -113,7 +120,8 @@ class DemoClient:
         # o mesmo final de série (consistência entre gráfico, análise e backtest)
         total = max(5000, n)
         # regimes de tendência alternados + ruído + ciclo
-        regime = np.repeat(rng.choice([-1, 0, 1], size=total // 40 + 1, p=[0.3, 0.2, 0.5]), 40)[:total]
+        choices = rng.choice([-1, 0, 1], size=total // 40 + 1, p=[0.3, 0.2, 0.5])
+        regime = np.repeat(choices, 40)[:total]
         drift = regime * 0.0015
         noise = rng.normal(0, 0.012, total)
         cycle = 0.02 * np.sin(np.arange(total) / 12.0)

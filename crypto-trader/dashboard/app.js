@@ -3,6 +3,11 @@
   "use strict";
 
   const $ = (id) => document.getElementById(id);
+  // escapa valores dinâmicos antes de interpolar em innerHTML (anti-XSS)
+  const esc = (v) =>
+    String(v).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
+    );
   const fmt = (v, d) => {
     if (v == null) return "—";
     const n = Number(v);
@@ -63,15 +68,22 @@
 
   async function api(path, opts) {
     const resp = await fetch(path, opts);
-    if (!resp.ok) throw new Error((await resp.json()).detail || resp.statusText);
+    if (!resp.ok) {
+      let detail = resp.statusText;
+      try {
+        const body = await resp.json();
+        if (body && body.detail) detail = JSON.stringify(body.detail);
+      } catch (_) { /* corpo não-JSON: mantém statusText */ }
+      throw new Error(detail);
+    }
     return resp.json();
   }
 
   async function loadConfig() {
     cfg = await api("/api/config");
     const pairSel = $("pair"), tfSel = $("timeframe");
-    pairSel.innerHTML = cfg.pairs.map((p) => `<option>${p}</option>`).join("");
-    tfSel.innerHTML = cfg.timeframes.map((t) => `<option>${t}</option>`).join("");
+    pairSel.innerHTML = cfg.pairs.map((p) => `<option>${esc(p)}</option>`).join("");
+    tfSel.innerHTML = cfg.timeframes.map((t) => `<option>${esc(t)}</option>`).join("");
     tfSel.value = cfg.timeframes.includes("4h") ? "4h" : cfg.timeframes[0];
   }
 
@@ -106,14 +118,14 @@
     const kind = s.trade_type === "swing" ? "Swing" : "Day trade";
     const rationale =
       withRationale && s.rationale && s.rationale.length
-        ? `<ul class="rationale">${s.rationale.map((r) => `<li>${r}</li>`).join("")}</ul>`
+        ? `<ul class="rationale">${s.rationale.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>`
         : "";
     return `<div class="sig">
       <div class="head"><span class="${dirClass}">${dirLabel}</span>
-        <span>${s.symbol} · ${s.timeframe} · ${kind} · ${s.score}/${s.max_score}</span></div>
+        <span>${esc(s.symbol)} · ${esc(s.timeframe)} · ${kind} · ${esc(s.score)}/${esc(s.max_score)}</span></div>
       <div class="lvls">Entrada ${fmt(s.entry)} · Stop ${fmt(s.stop)}<br>
         Alvos ${s.targets.map((t) => fmt(t)).join(" / ")}</div>
-      <div class="when">${new Date(s.created_at).toLocaleString("pt-BR")}</div>
+      <div class="when">${esc(new Date(s.created_at).toLocaleString("pt-BR"))}</div>
       ${rationale}</div>`;
   }
 
@@ -153,8 +165,8 @@
       ? open_positions
           .map(
             (p) => `<div class="sig"><div class="head">
-              <span class="${p.direction === "long" ? "dir-long" : "dir-short"}">${p.direction.toUpperCase()}</span>
-              <span>${p.symbol} · ${p.timeframe}</span></div>
+              <span class="${p.direction === "long" ? "dir-long" : "dir-short"}">${esc(p.direction.toUpperCase())}</span>
+              <span>${esc(p.symbol)} · ${esc(p.timeframe)}</span></div>
               <div class="lvls">Entrada ${fmt(p.entry)} · Stop ${fmt(p.stop)} · Resta ${fmt(p.remaining_size)}</div></div>`
           )
           .join("")

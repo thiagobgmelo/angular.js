@@ -1,15 +1,18 @@
 """Scanner: percorre pares × timeframes, emite sinais e atualiza a carteira paper."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+import logging
+from datetime import UTC, datetime, timedelta
 
 from app.alerts import telegram
 from app.analysis import strategy
-from app.config import Config, PROJECT_ROOT
+from app.config import PROJECT_ROOT, Config
 from app.data.exchange import make_client
 from app.paper.portfolio import PaperPortfolio
 from app.paper.store import Store
 from app.risk.manager import RiskManager
+
+log = logging.getLogger(__name__)
 
 # não repete o mesmo sinal (par+timeframe+direção) dentro desta janela
 DEDUP_HOURS = {"15m": 2, "1h": 8, "4h": 24, "1d": 72}
@@ -47,8 +50,7 @@ class Scanner:
                 try:
                     df = self.client.fetch_ohlcv(symbol, timeframe, limit=candles)
                 except Exception as err:  # rede/exchange: segue para o próximo
-                    if verbose:
-                        print(f"  ! {symbol} {timeframe}: erro ao buscar dados ({err})")
+                    log.warning("%s %s: erro ao buscar dados (%s)", symbol, timeframe, err)
                     continue
                 if len(df) < 60:
                     continue
@@ -64,7 +66,7 @@ class Scanner:
                     continue
 
                 dedup_h = DEDUP_HOURS.get(timeframe, 24)
-                since = (datetime.now(timezone.utc) - timedelta(hours=dedup_h)).isoformat()
+                since = (datetime.now(UTC) - timedelta(hours=dedup_h)).isoformat()
                 if self.store.has_recent_signal(symbol, timeframe, signal.direction, since):
                     continue
 
@@ -86,16 +88,27 @@ class Scanner:
         return new_signals
 
     def _update_open_positions(self) -> None:
-        """Confere TP/SL das posições paper abertas com o candle mais recente."""
+        """Confere TP/SL das posições abertas com os candles fechados ainda não vistos.
+
+        Idempotente: só processa candles com timestamp posterior ao marcador
+        `checked_until` da posição (ou à abertura, na primeira passada).
+        """
         for pos in self.portfolio.open_positions():
+            checked_until = max(
+                (e.get("ts", "") for e in pos["events"] if e.get("type") == "checked_until"),
+                default=pos["opened_at"],
+            )
             try:
-                df = self.client.fetch_ohlcv(pos["symbol"], pos["timeframe"], limit=3)
-            except Exception:
+                df = self.client.fetch_ohlcv(pos["symbol"], pos["timeframe"], limit=50)
+            except Exception as err:
+                log.warning("posição %s: erro ao buscar candles (%s)", pos["id"], err)
                 continue
-            closed = df.iloc[:-1].tail(2)  # candles fechados desde a última checagem
-            for _, candle in closed.iterrows():
+            for ts, candle in df.iloc[:-1].iterrows():  # apenas candles fechados
+                ts_iso = ts.isoformat()
+                if ts_iso <= checked_until:
+                    continue
                 pos = self.portfolio.update_with_candle(
-                    pos, float(candle["high"]), float(candle["low"])
+                    pos, float(candle["high"]), float(candle["low"]), candle_ts=ts_iso
                 )
                 if pos["status"] == "closed":
                     break

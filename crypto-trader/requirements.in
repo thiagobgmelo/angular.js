@@ -1,0 +1,11 @@
+# Ranges de dependências (fonte para atualização consciente).
+# O requirements.txt congela as versões exatas testadas.
+ccxt>=4.0
+pandas>=2.0
+numpy>=1.26
+fastapi>=0.110
+uvicorn[standard]>=0.29
+PyYAML>=6.0
+pytest>=8.0
+httpx>=0.27
+ruff>=0.4

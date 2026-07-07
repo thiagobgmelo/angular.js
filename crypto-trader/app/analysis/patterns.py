@@ -8,8 +8,8 @@ def _body(o: float, c: float) -> float:
     return abs(c - o)
 
 
-def _range(h: float, l: float) -> float:
-    return max(h - l, 1e-12)
+def _range(high: float, low: float) -> float:
+    return max(high - low, 1e-12)
 
 
 def is_bullish_engulfing(prev: pd.Series, cur: pd.Series) -> bool:

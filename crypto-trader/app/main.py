@@ -10,10 +10,13 @@ Uso:
 from __future__ import annotations
 
 import json
+import logging
 import sys
 import time
 
 from app.config import load_config
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
 
 def cmd_scan() -> None:
@@ -24,7 +27,8 @@ def cmd_scan() -> None:
     signals = scanner.scan_once()
     print(f"\n{len(signals)} sinal(is) novo(s).")
     summary = scanner.portfolio.summary()
-    print(f"Carteira paper: equity {summary['equity']} | posições abertas {summary['open_positions']}")
+    print(f"Carteira paper: equity {summary['equity']} | "
+          f"posições abertas {summary['open_positions']}")
 
 
 def cmd_watch() -> None:
@@ -60,8 +64,10 @@ def cmd_analyze(symbol: str, timeframe: str) -> None:
                 print(f"  • {r}")
     if signal:
         print(f"\n>>> SINAL {signal.direction.upper()} ({signal.trade_type})")
+        alvos = [f"{t:g}" for t in signal.targets]
+        rr = signal.rr_to(signal.targets[0])
         print(f"    Entrada {signal.entry:g} | Stop {signal.stop:g} | "
-              f"Alvos {[f'{t:g}' for t in signal.targets]} | R:R(TP1) {signal.rr_to(signal.targets[0]):.2f}")
+              f"Alvos {alvos} | R:R(TP1) {rr:.2f}")
     else:
         print("\nSem sinal no momento (confluência insuficiente).")
 
@@ -86,13 +92,19 @@ def cmd_backtest(symbol: str, timeframe: str, candles: int = 1500) -> None:
     if trade_list:
         print("\nÚltimos trades:")
         for t in trade_list[-10:]:
-            print(f"  {t['opened_at']} {t['direction']:>5} @ {t['entry']:g} → {t['exit_reason']:<14} pnl {t['pnl']:>10}")
+            print(f"  {t['opened_at']} {t['direction']:>5} @ {t['entry']:g} → "
+                  f"{t['exit_reason']:<14} pnl {t['pnl']:>10}")
 
 
 def cmd_serve(port: int = 8000) -> None:
+    import os
+
     import uvicorn
 
-    uvicorn.run("app.server:app", host="0.0.0.0", port=port)
+    # localhost por padrão; exporte HOST=0.0.0.0 conscientemente para expor
+    # na rede (a API tem endpoint mutável e não tem autenticação)
+    host = os.environ.get("HOST", "127.0.0.1")
+    uvicorn.run("app.server:app", host=host, port=port)
 
 
 def main() -> None:

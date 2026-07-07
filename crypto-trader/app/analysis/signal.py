@@ -1,8 +1,8 @@
 """Modelo de sinal de trade."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 
 SWING_TIMEFRAMES = {"4h", "6h", "8h", "12h", "1d", "3d", "1w"}
 
@@ -26,7 +26,7 @@ class Signal:
     risk_amount: float = 0.0        # valor em quote arriscado
     rationale: list[str] = field(default_factory=list)
     created_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
 
     @property
