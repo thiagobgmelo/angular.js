@@ -47,8 +47,20 @@ select, button {
 button:hover, select:hover { border-color: var(--accent); }
 button:disabled { opacity: .5; cursor: wait; }
 
-.equity { margin-left: auto; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.equity { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .equity b { color: var(--text-primary); }
+
+.latency {
+  margin-left: auto;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.latency.live { color: var(--up); border-color: var(--up); }
+.latency.stale { color: var(--down); border-color: var(--down); }
 
 main {
   display: grid;

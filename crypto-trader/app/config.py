@@ -8,7 +8,8 @@ from typing import Any
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CONFIG_PATH = PROJECT_ROOT / "config.yaml"
+# CRYPTO_TRADER_CONFIG permite apontar um config alternativo (testes, múltiplos perfis)
+CONFIG_PATH = Path(os.environ.get("CRYPTO_TRADER_CONFIG", PROJECT_ROOT / "config.yaml"))
 ENV_PATH = PROJECT_ROOT / ".env"
 
 

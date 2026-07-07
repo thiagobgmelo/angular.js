@@ -73,6 +73,30 @@ clara sobre o lado oposto (≥ 2 pontos) e o R:R até o TP1 é ≥ 1.5.
   TP2 = 2,5R (realiza 25%), TP3 = próxima zona de S/R (restante)
 - Simulação conservadora: se stop e alvo saem no mesmo candle, assume o stop
 
+## Arquitetura de dados — latência otimizada
+
+Em trading, a idade do dado define a qualidade da entrada. O modo ao vivo
+(`serve`/`watch`) usa **websocket da exchange (ccxt.pro)** alimentando um cache
+em memória que emite eventos — nada de polling:
+
+| Caminho | Latência |
+|---|---|
+| Reação ao fechamento de candle (gatilho da estratégia) | **< 1 s** (evento websocket) |
+| Stop/alvos das posições paper | **tick a tick** (throttle configurável, fill no nível exato) |
+| Dashboard | **push via SSE** — candle corrente se move em tempo real |
+| `/api/ohlcv` e `/api/analysis` | **milissegundos** (cache em memória, zero I/O de rede) |
+
+- A decisão da estratégia continua sendo tomada **em candle fechado** (correto
+  metodologicamente); o que é instantâneo é a *reação* ao fechamento e a
+  proteção das posições com o preço vivo.
+- **Resiliência**: reconexão automática com backoff; watchdog reinicia streams
+  parados (`feed.stale_after_s`); sem websocket, `feed.mode: rest` faz fetch
+  alinhado ao relógio dos candles (2 s após cada fechamento teórico).
+- **Observabilidade**: `GET /api/health` mostra a idade do dado por stream,
+  contadores de eventos e o tempo da última análise; o dashboard exibe um badge
+  de latência ("ao vivo · <1s").
+- Comandos batch (`scan`, `analyze`, `backtest`) continuam via REST simples.
+
 ## Dashboard
 
 `python -m app.main serve` e abra <http://localhost:8000>:

@@ -39,5 +39,10 @@ risk:
 paper:
   db_path: paper_trading.db
 
+feed:                      # modo ao vivo (watch/serve)
+  mode: websocket          # websocket (sub-segundo) | rest (fallback alinhado ao relógio)
+  tick_throttle_ms: 1000   # intervalo mínimo entre processamentos de tick por símbolo
+  stale_after_s: 90        # watchdog: reinicia streams sem eventos além disso
+
 scanner:
-  interval_seconds: 300    # intervalo do loop contínuo (modo watch)
+  interval_seconds: 300    # usado apenas pelo comando batch `scan` em loop externo

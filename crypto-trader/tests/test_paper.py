@@ -110,6 +110,49 @@ def test_checked_until_marker_single_and_updated(portfolio):
     assert markers[0]["ts"] == "2024-01-02T04:00:00+00:00"
 
 
+def test_tick_no_write_when_nothing_crossed(portfolio):
+    pos = open_pos(portfolio)
+    updated, changed = portfolio.update_with_tick(pos, 101.0)
+    assert changed is False
+    assert updated["status"] == "open"
+    assert updated["events"] == []
+
+
+def test_tick_stop_fills_at_stop_level(portfolio):
+    pos = open_pos(portfolio)
+    updated, changed = portfolio.update_with_tick(pos, 94.2)  # abaixo do stop 95
+    assert changed is True
+    assert updated["status"] == "closed"
+    # fill no nível do stop (95), não no preço do tick: perda exata de 100
+    assert abs(updated["realized_pnl"] + 100.0) < 1e-9
+
+
+def test_tick_tp1_breakeven_then_protected(portfolio):
+    pos = open_pos(portfolio)
+    pos, changed = portfolio.update_with_tick(pos, 108.0)   # cruza TP1
+    assert changed and pos["stop"] == 100.0 and pos["remaining_size"] == 10.0
+    pos, changed = portfolio.update_with_tick(pos, 99.9)    # volta ao entry
+    assert changed and pos["status"] == "closed"
+    assert abs(pos["realized_pnl"] - 75.0) < 1e-9           # só o lucro do TP1
+
+
+def test_tick_crossing_multiple_levels_in_one_move(portfolio):
+    pos = open_pos(portfolio)
+    pos, changed = portfolio.update_with_tick(pos, 121.0)   # salta TP1+TP2+TP3
+    assert changed and pos["status"] == "closed"
+    # TP1: 7.5*10 | TP2: 12.5*5 | TP3: 20*5 → 237.5
+    assert abs(pos["realized_pnl"] - 237.5) < 1e-9
+
+
+def test_tick_short_direction(portfolio):
+    sig = long_signal_dict(entry=100.0, stop=105.0, targets=(92.5, 87.5, 80.0))
+    sig["direction"] = "short"
+    pos = open_pos(portfolio, sig)
+    pos, changed = portfolio.update_with_tick(pos, 92.0)    # cruza TP1 do short
+    assert changed and pos["stop"] == 100.0
+    assert abs(pos["realized_pnl"] - 75.0) < 1e-9
+
+
 def test_summary_metrics(portfolio):
     pos = open_pos(portfolio)
     portfolio.update_with_candle(pos, high=101.0, low=94.0)  # stop

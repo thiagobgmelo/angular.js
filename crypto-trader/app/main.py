@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import logging
 import sys
-import time
 
 from app.config import load_config
 
@@ -32,15 +31,15 @@ def cmd_scan() -> None:
 
 
 def cmd_watch() -> None:
-    from app.scanner import Scanner
+    import asyncio
 
-    cfg = load_config()
-    scanner = Scanner(cfg)
-    interval = cfg.get("scanner.interval_seconds", 300)
-    print(f"Scanner contínuo a cada {interval}s (Ctrl+C para sair)")
-    while True:
-        scanner.scan_once()
-        time.sleep(interval)
+    from app.engine import run_live
+
+    print("Engine em tempo real: análise em candle fechado + stops tick a tick")
+    try:
+        asyncio.run(run_live(load_config()))
+    except KeyboardInterrupt:
+        print("\nEncerrado.")
 
 
 def cmd_analyze(symbol: str, timeframe: str) -> None:

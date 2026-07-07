@@ -117,6 +117,81 @@ class PaperPortfolio:
         updated.update(fields)
         return updated
 
+    def update_with_tick(self, pos: dict, price: float) -> tuple[dict, bool]:
+        """Avalia stop/alvos contra um preço ao vivo (tick).
+
+        Fills no nível exato (stop no preço do stop, alvo no do alvo). Só
+        persiste quando algum nível é cruzado — retorna (posição, mudou?).
+        Um único tick pode cruzar níveis em sequência (tp1 e tp2, por ex.).
+        """
+        entry, stop = pos["entry"], pos["stop"]
+        tp1, tp2, tp3 = pos["targets"][:3]
+        events: list = list(pos["events"])
+        remaining = pos["remaining_size"]
+        realized = pos["realized_pnl"]
+        is_long = pos["direction"] == "long"
+
+        def hit_stop() -> bool:
+            return price <= stop if is_long else price >= stop
+
+        def hit(level: float) -> bool:
+            return price >= level if is_long else price <= level
+
+        def pnl(exit_price: float, size: float) -> float:
+            return (exit_price - entry) * size if is_long else (entry - exit_price) * size
+
+        hit_types = {e.get("type") for e in events}
+        changed = False
+        done = False
+
+        if hit_stop():
+            realized += pnl(stop, remaining)
+            stop_kind = "stop_breakeven" if "tp1" in hit_types else "stop"
+            events.append({"at": _now(), "type": stop_kind, "price": stop})
+            remaining = 0.0
+            changed = done = True
+        else:
+            if "tp1" not in hit_types and hit(tp1):
+                part = min(pos["size"] * TP1_FRACTION, remaining)
+                realized += pnl(tp1, part)
+                remaining -= part
+                stop = entry  # breakeven
+                events.append({"at": _now(), "type": "tp1", "price": tp1})
+                events.append({"at": _now(), "type": "breakeven", "price": entry})
+                hit_types.add("tp1")
+                changed = True
+            if "tp2" not in hit_types and "tp1" in hit_types and hit(tp2):
+                part = min(pos["size"] * TP2_FRACTION, remaining)
+                realized += pnl(tp2, part)
+                remaining -= part
+                events.append({"at": _now(), "type": "tp2", "price": tp2})
+                hit_types.add("tp2")
+                changed = True
+            if "tp2" in hit_types and hit(tp3):
+                realized += pnl(tp3, remaining)
+                remaining = 0.0
+                events.append({"at": _now(), "type": "tp3", "price": tp3})
+                changed = done = True
+
+        if not changed:
+            return pos, False
+
+        fields: dict = {
+            "remaining_size": remaining,
+            "realized_pnl": realized,
+            "stop": stop,
+            "events": events,
+        }
+        if done or remaining <= 1e-12:
+            fields["status"] = "closed"
+            fields["closed_at"] = _now()
+        self.store.update_position(pos["id"], **fields)
+        if fields.get("status") == "closed":
+            self.store.record_equity(_now(), self.equity)
+        updated = dict(pos)
+        updated.update(fields)
+        return updated, True
+
     def summary(self) -> dict:
         closed = self.closed_positions()
         wins = [p for p in closed if p["realized_pnl"] > 0]

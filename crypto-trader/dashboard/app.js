@@ -87,8 +87,15 @@
     tfSel.value = cfg.timeframes.includes("4h") ? "4h" : cfg.timeframes[0];
   }
 
+  // último candle exibido (em formação) — atualizado ao vivo pelos ticks
+  let lastCandle = null;
+  let tfSeconds = 14400;
+  const TF_SECONDS = { "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
+                       "1h": 3600, "4h": 14400, "1d": 86400 };
+
   async function loadChart() {
     const symbol = $("pair").value, timeframe = $("timeframe").value;
+    tfSeconds = TF_SECONDS[timeframe] || 14400;
     const rows = await api(
       `/api/ohlcv?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}&limit=300`
     );
@@ -97,6 +104,11 @@
     })));
     emaFast.setData(rows.filter((r) => r.ema_fast != null).map((r) => ({ time: r.time, value: r.ema_fast })));
     emaSlow.setData(rows.filter((r) => r.ema_slow != null).map((r) => ({ time: r.time, value: r.ema_slow })));
+    lastCandle = rows.length ? {
+      time: rows[rows.length - 1].time,
+      open: rows[rows.length - 1].open, high: rows[rows.length - 1].high,
+      low: rows[rows.length - 1].low, close: rows[rows.length - 1].close,
+    } : null;
     chart.timeScale().fitContent();
   }
 
@@ -200,6 +212,60 @@
     }
   });
 
+  // ---------- tempo real (SSE) ----------
+  let sseAlive = false;
+  let lastTickAt = 0;
+
+  function updateLatencyBadge() {
+    const badge = $("latency-badge");
+    if (!sseAlive || !lastTickAt) {
+      badge.textContent = "sem stream — polling";
+      badge.className = "latency stale";
+      return;
+    }
+    const age = (Date.now() - lastTickAt) / 1000;
+    badge.textContent = `ao vivo · ${age < 1 ? "<1" : age.toFixed(0)}s`;
+    badge.className = "latency " + (age <= 10 ? "live" : "stale");
+  }
+
+  function onTick(d) {
+    lastTickAt = Date.now();
+    if (d.symbol !== $("pair").value || !lastCandle) return;
+    // atualiza o candle em formação no cliente (aspecto de corretora)
+    const bucket = Math.floor(d.ts / 1000 / tfSeconds) * tfSeconds;
+    if (bucket > lastCandle.time) {
+      lastCandle = { time: bucket, open: d.price, high: d.price, low: d.price, close: d.price };
+    } else {
+      lastCandle.close = d.price;
+      lastCandle.high = Math.max(lastCandle.high, d.price);
+      lastCandle.low = Math.min(lastCandle.low, d.price);
+    }
+    candles.update(lastCandle);
+  }
+
+  function onCandle(d) {
+    if (d.symbol !== $("pair").value || d.timeframe !== $("timeframe").value) return;
+    candles.update(d.candle);   // consolida o candle fechado
+    lastCandle = {
+      time: d.candle.time + d.tf_seconds,
+      open: d.candle.close, high: d.candle.close,
+      low: d.candle.close, close: d.candle.close,
+    };
+  }
+
+  function connectStream() {
+    const es = new EventSource("/api/stream");
+    es.onopen = () => { sseAlive = true; };
+    es.onerror = () => { sseAlive = false; };  // EventSource reconecta sozinho
+    es.addEventListener("tick", (e) => onTick(JSON.parse(e.data)));
+    es.addEventListener("candle", (e) => onCandle(JSON.parse(e.data)));
+    es.addEventListener("signal", () => { loadSignals(); loadAnalysis(); loadPortfolio(); });
+    es.addEventListener("position", () => loadPortfolio());
+  }
+
   loadConfig().then(refreshAll);
-  setInterval(refreshAll, 60000); // polling leve
+  connectStream();
+  setInterval(updateLatencyBadge, 1000);
+  // fallback: só faz polling completo quando o stream não está vivo
+  setInterval(() => { if (!sseAlive) refreshAll(); }, 60000);
 })();
