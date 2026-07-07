@@ -83,7 +83,7 @@ def test_market_feed_restart_respawns_all_streams():
     feed = MarketFeed("binance", ["BTC/USDT", "ETH/USDT"], ["1h", "4h"])
     spawned = []
 
-    def fake_spawn(coro):
+    def fake_spawn(coro, symbol=None):
         spawned.append(coro.cr_code.co_name)
         coro.close()
 
@@ -96,6 +96,28 @@ def test_market_feed_restart_respawns_all_streams():
     asyncio.run(scenario())
     assert spawned.count("_watch_ohlcv_loop") == 4  # 2 pares × 2 timeframes
     assert spawned.count("_watch_ticker_loop") == 2
+
+
+def test_demo_feed_add_and_remove_pair():
+    from app.data.feed import DemoFeed
+
+    feed = DemoFeed(["BTC/USDT"], ["1h"], tick_throttle_ms=0)
+
+    async def scenario():
+        feed._running = True
+        await feed.add_pair("ETH/USDT")
+        assert "ETH/USDT" in feed.pairs
+        assert len(feed.caches[("ETH/USDT", "1h")].rows) > 0     # seed feito
+        assert "ETH/USDT" in feed._symbol_tasks                  # stream rodando
+        await feed.add_pair("ETH/USDT")                          # idempotente
+        assert feed.pairs.count("ETH/USDT") == 1
+        await feed.remove_pair("ETH/USDT")
+        assert "ETH/USDT" not in feed.pairs
+        assert ("ETH/USDT", "1h") not in feed.caches
+        assert "ETH/USDT" not in feed._symbol_tasks
+        await feed.stop()
+
+    asyncio.run(scenario())
 
 
 def test_health_reports_streams():

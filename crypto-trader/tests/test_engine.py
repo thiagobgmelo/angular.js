@@ -83,6 +83,49 @@ def test_tick_updates_open_position(engine_and_feed):
     assert abs(closed[0]["realized_pnl"] + 100.0) < 1e-9
 
 
+class FakeScreener:
+    def __init__(self, symbols):
+        self.symbols = symbols
+
+    def screen(self):
+        return [{"symbol": s, "volume_24h": 1e9, "pinned": False} for s in self.symbols]
+
+
+def test_refresh_universe_applies_diff_but_keeps_open_positions(tmp_path):
+    from app.data.feed import DemoFeed
+
+    cfg = make_cfg(tmp_path)
+    feed = DemoFeed(["BTC/USDT", "ETH/USDT"], ["1h"], tick_throttle_ms=0)
+    engine = TradingEngine(cfg, feed, screener=FakeScreener(["BTC/USDT", "SOL/USDT"]))
+
+    # posição aberta em ETH/USDT: o par sai do screener mas NÃO pode sair do feed
+    sig = {
+        "created_at": "2024-01-01T00:00:00+00:00", "symbol": "ETH/USDT",
+        "timeframe": "1h", "direction": "long", "trade_type": "day_trade",
+        "entry": 3000.0, "stop": 2900.0, "targets": [3150.0, 3250.0, 3400.0],
+        "score": 5, "max_score": 7, "position_size": 1.0,
+        "risk_amount": 100.0, "rationale": ["teste"],
+    }
+    sig_id = engine.store.save_signal(sig)
+    engine.portfolio.open_from_signal(sig_id, sig)
+
+    async def scenario():
+        feed._running = True
+        q = engine.subscribe()
+        diff = await engine.refresh_universe()
+        await feed.stop()
+        return diff, q
+
+    diff, q = asyncio.run(scenario())
+    assert "SOL/USDT" in feed.pairs          # adicionado
+    assert "ETH/USDT" in feed.pairs          # protegido pela posição aberta
+    assert diff["added"] == ["SOL/USDT"]
+    assert diff["removed"] == []
+    ev = q.get_nowait()
+    assert ev["type"] == "universe"
+    assert set(ev["pairs"]) == {"BTC/USDT", "ETH/USDT", "SOL/USDT"}
+
+
 def test_scan_all_returns_list(engine_and_feed):
     engine, feed = engine_and_feed
     seed_feed(feed)

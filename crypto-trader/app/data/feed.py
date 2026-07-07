@@ -95,7 +95,8 @@ class BaseFeed:
         self._last_tick_emit: dict[str, float] = {}
         self._candle_cbs: list[CandleCallback] = []
         self._tick_cbs: list[TickCallback] = []
-        self._tasks: list[asyncio.Task] = []
+        self._tasks: list[asyncio.Task] = []                    # tasks globais (watchdog)
+        self._symbol_tasks: dict[str, list[asyncio.Task]] = {}  # streams por símbolo
         self._running = False
         self.started_at: float | None = None
 
@@ -155,21 +156,61 @@ class BaseFeed:
         for cb in self._tick_cbs:
             await cb(symbol, float(price), int(ts_ms))
 
+    # --- universo dinâmico ---
+    async def add_pair(self, symbol: str) -> None:
+        """Passa a acompanhar um símbolo novo (seed + streams)."""
+        if symbol in self.pairs:
+            return
+        self.pairs.append(symbol)
+        for tf in self.timeframes:
+            self.caches[(symbol, tf)] = CandleCache()
+        await self._seed_symbol(symbol)
+        if self._running:
+            self._spawn_symbol(symbol)
+        log.info("feed: par adicionado ao universo: %s", symbol)
+
+    async def remove_pair(self, symbol: str) -> None:
+        """Deixa de acompanhar um símbolo (cancela streams, limpa caches)."""
+        if symbol not in self.pairs:
+            return
+        self.pairs.remove(symbol)
+        for task in self._symbol_tasks.pop(symbol, []):
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        for tf in self.timeframes:
+            self.caches.pop((symbol, tf), None)
+        self.last_prices.pop(symbol, None)
+        self._last_tick_emit.pop(symbol, None)
+        log.info("feed: par removido do universo: %s", symbol)
+
+    async def _seed_symbol(self, symbol: str) -> None:
+        raise NotImplementedError
+
+    def _spawn_symbol(self, symbol: str) -> None:
+        raise NotImplementedError
+
     # --- ciclo de vida ---
     async def start(self) -> None:
         raise NotImplementedError
 
     async def stop(self) -> None:
         self._running = False
-        for task in self._tasks:
+        all_tasks = self._tasks + [t for ts in self._symbol_tasks.values() for t in ts]
+        for task in all_tasks:
             task.cancel()
-        for task in self._tasks:
+        for task in all_tasks:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         self._tasks.clear()
+        self._symbol_tasks.clear()
 
-    def _spawn(self, coro) -> None:
-        self._tasks.append(asyncio.get_running_loop().create_task(coro))
+    def _spawn(self, coro, symbol: str | None = None) -> None:
+        task = asyncio.get_running_loop().create_task(coro)
+        if symbol is None:
+            self._tasks.append(task)
+        else:
+            self._symbol_tasks.setdefault(symbol, []).append(task)
 
 
 class MarketFeed(BaseFeed):
@@ -195,30 +236,35 @@ class MarketFeed(BaseFeed):
     async def start(self) -> None:
         self._running = True
         self.started_at = time.time()
-        await self._seed_history()
-        if self.mode == "websocket":
-            for symbol in self.pairs:
-                for tf in self.timeframes:
-                    self._spawn(self._watch_ohlcv_loop(symbol, tf))
-                self._spawn(self._watch_ticker_loop(symbol))
-        else:
-            for symbol in self.pairs:
-                for tf in self.timeframes:
-                    self._spawn(self._rest_candle_loop(symbol, tf))
-                self._spawn(self._rest_ticker_loop(symbol))
+        for i, symbol in enumerate(self.pairs, 1):
+            await self._seed_symbol(symbol)
+            log.info("seed %d/%d: %s", i, len(self.pairs), symbol)
+        for symbol in self.pairs:
+            self._spawn_symbol(symbol)
         self._spawn(self._watchdog_loop())
-        log.info("MarketFeed iniciado (%s, modo %s)", self.exchange.id, self.mode)
+        log.info(
+            "MarketFeed iniciado (%s, modo %s, %d pares)",
+            self.exchange.id, self.mode, len(self.pairs),
+        )
 
     async def stop(self) -> None:
         await super().stop()
         await self.exchange.close()
 
-    async def _seed_history(self) -> None:
-        for symbol in self.pairs:
+    async def _seed_symbol(self, symbol: str) -> None:
+        for tf in self.timeframes:
+            raw = await self.exchange.fetch_ohlcv(symbol, tf, limit=self.seed_candles)
+            self.caches[(symbol, tf)].seed(raw)
+
+    def _spawn_symbol(self, symbol: str) -> None:
+        if self.mode == "websocket":
             for tf in self.timeframes:
-                raw = await self.exchange.fetch_ohlcv(symbol, tf, limit=self.seed_candles)
-                self.caches[(symbol, tf)].seed(raw)
-                log.info("seed %s %s: %d candles", symbol, tf, len(raw))
+                self._spawn(self._watch_ohlcv_loop(symbol, tf), symbol=symbol)
+            self._spawn(self._watch_ticker_loop(symbol), symbol=symbol)
+        else:
+            for tf in self.timeframes:
+                self._spawn(self._rest_candle_loop(symbol, tf), symbol=symbol)
+            self._spawn(self._rest_ticker_loop(symbol), symbol=symbol)
 
     async def _watch_ohlcv_loop(self, symbol: str, tf: str) -> None:
         backoff = 1.0
@@ -296,20 +342,12 @@ class MarketFeed(BaseFeed):
         return entry is None or now - entry[1] / 1000.0 > self.stale_after_s
 
     async def _restart(self) -> None:
-        for task in self._tasks:
-            if task is not asyncio.current_task():
+        for tasks in self._symbol_tasks.values():
+            for task in tasks:
                 task.cancel()
-        self._tasks = [t for t in self._tasks if t is asyncio.current_task()]
-        if self.mode == "websocket":
-            for symbol in self.pairs:
-                for tf in self.timeframes:
-                    self._spawn(self._watch_ohlcv_loop(symbol, tf))
-                self._spawn(self._watch_ticker_loop(symbol))
-        else:
-            for symbol in self.pairs:
-                for tf in self.timeframes:
-                    self._spawn(self._rest_candle_loop(symbol, tf))
-                self._spawn(self._rest_ticker_loop(symbol))
+        self._symbol_tasks.clear()
+        for symbol in self.pairs:
+            self._spawn_symbol(symbol)
 
 
 class DemoFeed(BaseFeed):
@@ -331,16 +369,29 @@ class DemoFeed(BaseFeed):
         self._running = True
         self.started_at = time.time()
         for symbol in self.pairs:
-            for tf in self.timeframes:
-                df = self.client.fetch_ohlcv(symbol, tf, limit=500)
-                rows = [
-                    [int(ts.timestamp() * 1000), r["open"], r["high"], r["low"],
-                     r["close"], r["volume"]]
-                    for ts, r in df.iterrows()
-                ]
-                self.caches[(symbol, tf)].seed(rows)
-            self._spawn(self._tick_loop(symbol))
+            await self._seed_symbol(symbol)
+            self._spawn_symbol(symbol)
         log.info("DemoFeed iniciado (%d pares, tick %.1fs)", len(self.pairs), self.tick_interval_s)
+
+    async def _seed_symbol(self, symbol: str) -> None:
+        # as séries sintéticas são independentes por timeframe; rescala todas
+        # para terminarem no mesmo preço, senão o primeiro tick ao vivo "salta"
+        ref_price: float | None = None
+        for tf in self.timeframes:
+            df = self.client.fetch_ohlcv(symbol, tf, limit=500)
+            last_close = float(df["close"].iloc[-1])
+            if ref_price is None:
+                ref_price = last_close
+            scale = ref_price / last_close
+            rows = [
+                [int(ts.timestamp() * 1000), r["open"] * scale, r["high"] * scale,
+                 r["low"] * scale, r["close"] * scale, r["volume"]]
+                for ts, r in df.iterrows()
+            ]
+            self.caches[(symbol, tf)].seed(rows)
+
+    def _spawn_symbol(self, symbol: str) -> None:
+        self._spawn(self._tick_loop(symbol), symbol=symbol)
 
     async def _tick_loop(self, symbol: str) -> None:
         rng = np.random.default_rng(abs(hash(symbol)) % (2**32))
@@ -374,11 +425,14 @@ class DemoFeed(BaseFeed):
         await self.ingest_candle(symbol, tf, row)
 
 
-def make_feed(cfg) -> BaseFeed:
-    """Fábrica a partir do Config; EXCHANGE_ID=demo ativa o DemoFeed."""
+def make_feed(cfg, pairs: list[str] | None = None) -> BaseFeed:
+    """Fábrica a partir do Config; EXCHANGE_ID=demo ativa o DemoFeed.
+
+    `pairs` explícito (vindo do screener) sobrepõe a lista estática do config.
+    """
     import os  # noqa: PLC0415
 
-    pairs = cfg.get("market.pairs", ["BTC/USDT"])
+    pairs = list(pairs) if pairs else cfg.get("market.pairs", ["BTC/USDT"])
     timeframes = cfg.get("market.timeframes", ["4h"])
     throttle = cfg.get("feed.tick_throttle_ms", 1000)
     stale = cfg.get("feed.stale_after_s", 90)

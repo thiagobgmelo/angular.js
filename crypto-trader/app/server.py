@@ -18,8 +18,7 @@ from app.analysis import indicators, strategy
 from app.backtest import engine as backtest_engine
 from app.config import PROJECT_ROOT, load_config
 from app.data.exchange import make_client
-from app.data.feed import make_feed
-from app.engine import TradingEngine
+from app.engine import TradingEngine, build_live_components
 
 log = logging.getLogger(__name__)
 
@@ -27,18 +26,21 @@ DASHBOARD_DIR = PROJECT_ROOT / "dashboard"
 SSE_KEEPALIVE_S = 15
 
 _cfg = load_config()
-_ALLOWED_PAIRS: set[str] = set(_cfg.get("market.pairs", []))
-_ALLOWED_TIMEFRAMES: set[str] = set(_cfg.get("market.timeframes", []))
-
-_feed = make_feed(_cfg)
-_engine = TradingEngine(_cfg, _feed)
+# preenchidos no lifespan (o FastAPI só atende requests após o startup concluir)
+_feed = None
+_engine: TradingEngine | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _feed, _engine
+    # o screener faz chamadas REST síncronas: roda em thread
+    _feed, _engine = await asyncio.to_thread(build_live_components, _cfg)
     await _feed.start()
-    log.info("feed iniciado; dados fluindo em memória")
+    _engine.start_refresh_loop()
+    log.info("feed iniciado com %d pares; dados fluindo em memória", len(_feed.pairs))
     yield
+    await _engine.stop_refresh_loop()
     await _feed.stop()
 
 
@@ -46,10 +48,10 @@ app = FastAPI(title="Crypto Trader", version="2.0", lifespan=lifespan)
 
 
 def _validate_market(symbol: str, timeframe: str) -> None:
-    """Restringe aos pares/timeframes do config (o que o feed transmite)."""
-    if symbol not in _ALLOWED_PAIRS:
-        raise HTTPException(status_code=422, detail=f"Par não configurado: {symbol!r}")
-    if timeframe not in _ALLOWED_TIMEFRAMES:
+    """Restringe ao universo corrente do feed (dinâmico via screener)."""
+    if symbol not in _feed.pairs:
+        raise HTTPException(status_code=422, detail=f"Par fora do universo: {symbol!r}")
+    if timeframe not in _feed.timeframes:
         raise HTTPException(status_code=422, detail=f"Timeframe não configurado: {timeframe!r}")
 
 
@@ -57,8 +59,9 @@ def _validate_market(symbol: str, timeframe: str) -> None:
 def get_config():
     return {
         "exchange": _cfg.get("exchange.id"),
-        "pairs": _cfg.get("market.pairs"),
-        "timeframes": _cfg.get("market.timeframes"),
+        "pairs": list(_feed.pairs),
+        "timeframes": list(_feed.timeframes),
+        "screener_enabled": bool(_cfg.get("screener.enabled", True)),
     }
 
 

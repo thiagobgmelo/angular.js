@@ -39,6 +39,27 @@ ciclo de vida de um trade e operação no dia a dia.
                                        └─────────────────────────┘
 ```
 
+## Universo monitorado — screener automático
+
+Quais moedas o watcher acompanha não é uma lista fixa: um **screener**
+([ADR-013](02-decisoes-de-arquitetura.md#adr-013--screener-de-universo-com-critérios-objetivos-v4))
+seleciona o universo na inicialização e o re-avalia a cada `refresh_hours`
+(default 6 h), com critérios objetivos definidos em `screener:` no config:
+
+1. Mercado **spot USDT ativo** (sem futuros, sem tokens alavancados UP/DOWN/BULL/BEAR)
+2. **Volume 24h ≥ US$ 20M** — liquidez como proxy de confiança
+3. **Histórico ≥ 180 dias** — exclui listagens recentes sem gráfico analisável
+4. Sem stablecoins/fiat como base (USDC, FDUSD, DAI, EUR...)
+5. Ranking por volume, corte no **top 25** (limite de streams/CPU)
+6. **Majors sempre presentes** (`always_include`: BTC, ETH, SOL, BNB) + denylist manual
+
+Cada par do universo ganha seus próprios streams websocket (candles em todos
+os timeframes + ticker), rodando **em paralelo** como tasks assíncronas
+independentes. Quando o universo muda no re-screening, os streams são
+adicionados/removidos a quente e o dashboard atualiza o seletor via evento
+SSE `universe`. Proteção: **par com posição paper aberta nunca sai do
+monitoramento** (o stop precisa continuar protegido).
+
 ## A estratégia — motor de confluência
 
 A cada **candle fechado** (nunca em formação — ver

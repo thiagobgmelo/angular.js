@@ -106,6 +106,14 @@ class DemoClient:
         "ETH/USDT": 3000.0,
         "SOL/USDT": 150.0,
         "BNB/USDT": 600.0,
+        "XRP/USDT": 2.0,
+        "ADA/USDT": 0.9,
+        "DOGE/USDT": 0.3,
+        "AVAX/USDT": 35.0,
+        "LINK/USDT": 20.0,
+        "DOT/USDT": 7.0,
+        "LTC/USDT": 100.0,
+        "MATIC/USDT": 0.5,
     }
     TF_SECONDS = {
         "1m": 60, "5m": 300, "15m": 900, "30m": 1800,

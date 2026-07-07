@@ -50,6 +50,17 @@ sintéticos determinísticos — útil para conhecer o sistema sem internet:
 EXCHANGE_ID=demo python -m app.main serve
 ```
 
+**Watcher em background**: o `watch` é headless (sinais via log + Telegram).
+Para rodar continuamente:
+
+```bash
+nohup python -m app.main watch >> watcher.log 2>&1 &   # simples
+# ou, para produção pessoal, um service do systemd:
+#   ExecStart=/usr/bin/python3 -m app.main watch
+#   WorkingDirectory=/caminho/para/crypto-trader
+#   Restart=on-failure
+```
+
 ## A estratégia — motor de confluência
 
 Cada critério a favor de um lado soma 1 ponto (máx. 7). Sinal é emitido quando o
@@ -90,6 +101,12 @@ em memória que emite eventos — nada de polling:
 | Dashboard | **push via SSE** — candle corrente se move em tempo real |
 | `/api/ohlcv` e `/api/analysis` | **milissegundos** (cache em memória, zero I/O de rede) |
 
+- **Universo automático (screener)**: as moedas monitoradas são selecionadas
+  por critérios objetivos — spot USDT, volume 24h ≥ US$ 20M, histórico ≥ 180
+  dias, sem stablecoins/alavancados — ranqueadas por volume (top 25), com as
+  majors (BTC, ETH, SOL, BNB) sempre presentes. Re-avaliação a cada 6 h com
+  streams adicionados/removidos a quente; par com posição aberta nunca sai.
+  Tudo configurável em `screener:` no config (`enabled: false` = lista fixa).
 - A decisão da estratégia continua sendo tomada **em candle fechado** (correto
   metodologicamente); o que é instantâneo é a *reação* ao fechamento e a
   proteção das posições com o preço vivo.

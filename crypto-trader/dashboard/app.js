@@ -79,10 +79,17 @@
     return resp.json();
   }
 
+  function setPairOptions(pairs) {
+    const pairSel = $("pair");
+    const current = pairSel.value;
+    pairSel.innerHTML = pairs.map((p) => `<option>${esc(p)}</option>`).join("");
+    if (pairs.includes(current)) pairSel.value = current; // preserva a seleção
+  }
+
   async function loadConfig() {
     cfg = await api("/api/config");
-    const pairSel = $("pair"), tfSel = $("timeframe");
-    pairSel.innerHTML = cfg.pairs.map((p) => `<option>${esc(p)}</option>`).join("");
+    setPairOptions(cfg.pairs);
+    const tfSel = $("timeframe");
     tfSel.innerHTML = cfg.timeframes.map((t) => `<option>${esc(t)}</option>`).join("");
     tfSel.value = cfg.timeframes.includes("4h") ? "4h" : cfg.timeframes[0];
   }
@@ -261,6 +268,10 @@
     es.addEventListener("candle", (e) => onCandle(JSON.parse(e.data)));
     es.addEventListener("signal", () => { loadSignals(); loadAnalysis(); loadPortfolio(); });
     es.addEventListener("position", () => loadPortfolio());
+    es.addEventListener("universe", (e) => {
+      const d = JSON.parse(e.data);
+      setPairOptions(d.pairs); // universo do screener mudou
+    });
   }
 
   loadConfig().then(refreshAll);

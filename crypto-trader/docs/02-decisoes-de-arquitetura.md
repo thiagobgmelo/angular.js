@@ -228,3 +228,31 @@ torna a instalação reproduzível — num sistema financeiro, "funciona com a
 versão que baixou hoje" não é aceitável. Duas exceções documentadas no
 próprio config: `S311` (RNG não-criptográfico é correto para dados demo) e
 `S101` em testes (assert é a ferramenta do pytest).
+
+---
+
+## ADR-013 — Screener de universo com critérios objetivos (v4)
+
+**Contexto**: o usuário pediu monitoramento paralelo de "majors + altcoins
+confiáveis com critérios claros e validados". Confiança precisa ser
+operacionalizada em regras verificáveis, não numa lista subjetiva.
+
+**Alternativas**: lista manual curada (subjetiva, envelhece); todos os pares
+da exchange (centenas de streams, cheio de lixo ilíquido); fontes externas de
+"rating" de projetos (opacas, pagas, mais uma dependência).
+
+**Decisão**: screener automático (`app/screener.py`) sobre dados da própria
+exchange, com critérios transparentes e configuráveis: spot USDT ativo,
+**volume 24h ≥ US$ 20M** (liquidez), **histórico ≥ 180 dias** de candles 1d
+(maturidade — exclui listagens recentes), exclusão estrutural de stablecoins/
+fiat e tokens alavancados, ranking por volume com corte em **25 pares**, e
+`always_include` fixando as majors (BTC, ETH, SOL, BNB). Universo re-avaliado
+a cada 6 h com regra de proteção: **par com posição aberta nunca é removido**
+do monitoramento. `enabled: false` volta à lista estática.
+
+**Porquê**: volume e maturidade são os proxies de confiança *mensuráveis* —
+moeda ilíquida tem spread ruim e é manipulável; listagem recente não tem
+gráfico para analisar (nem EMA200 diária). Os critérios ficam no config, à
+vista, ajustáveis e auditáveis: exatamente o que "critérios claros e
+validados" significa na prática. A filtragem é uma função pura
+(`select_universe`) testada com payloads realistas da exchange.

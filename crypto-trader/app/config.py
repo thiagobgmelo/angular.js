@@ -64,6 +64,16 @@ def validate(cfg: Config) -> None:
     max_pos = cfg.get("risk.max_open_positions", 5)
     if max_pos < 1:
         problems.append(f"risk.max_open_positions deve ser >= 1; recebido {max_pos}")
+    if cfg.get("screener.enabled", True):
+        max_pairs = cfg.get("screener.max_pairs", 25)
+        if not 1 <= max_pairs <= 100:
+            problems.append(f"screener.max_pairs deve estar em [1, 100]; recebido {max_pairs}")
+        refresh = cfg.get("screener.refresh_hours", 6)
+        if refresh < 1:
+            problems.append(f"screener.refresh_hours deve ser >= 1; recebido {refresh}")
+        min_vol = cfg.get("screener.min_quote_volume_24h", 20_000_000)
+        if min_vol < 0:
+            problems.append("screener.min_quote_volume_24h não pode ser negativo")
     if problems:
         raise ValueError("Configuração inválida:\n  - " + "\n  - ".join(problems))
 

@@ -4,7 +4,7 @@ exchange:
   rate_limit: true
 
 market:
-  pairs:
+  pairs:               # usado quando screener.enabled=false (universo estático)
     - BTC/USDT
     - ETH/USDT
     - SOL/USDT
@@ -15,6 +15,20 @@ market:
     - 4h
     - 1d
   candles: 400         # candles buscados por análise (mín. ~250 p/ EMA 200)
+
+screener:              # descoberta dinâmica do universo monitorado
+  enabled: true
+  quote: USDT
+  min_quote_volume_24h: 20000000   # US$ 20M/24h — liquidez como proxy de confiança
+  min_history_days: 180            # exclui listagens recentes sem histórico
+  max_pairs: 25                    # limite de streams/CPU (ranking por volume)
+  refresh_hours: 6                 # re-screening periódico do universo
+  always_include:                  # majors sempre presentes, imunes ao corte
+    - BTC/USDT
+    - ETH/USDT
+    - SOL/USDT
+    - BNB/USDT
+  exclude: []                      # denylist manual
 
 strategy:
   score_threshold: 4       # score mínimo de confluência para emitir sinal

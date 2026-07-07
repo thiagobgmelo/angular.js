@@ -26,9 +26,11 @@ BUS_QUEUE_SIZE = 500
 
 
 class TradingEngine:
-    def __init__(self, cfg: Config, feed: BaseFeed):
+    def __init__(self, cfg: Config, feed: BaseFeed, screener=None):
         self.cfg = cfg
         self.feed = feed
+        self.screener = screener
+        self._refresh_task: asyncio.Task | None = None
         db_path = PROJECT_ROOT / cfg.get("paper.db_path", "paper_trading.db")
         self.store = Store(db_path)
         self.portfolio = PaperPortfolio(self.store, cfg.get("risk.account_equity", 10000.0))
@@ -134,13 +136,67 @@ class TradingEngine:
     async def scan_all(self) -> list[dict]:
         """Análise imediata de todos os pares×timeframes a partir do cache."""
         new_signals = []
-        for symbol in self.cfg.get("market.pairs", []):
-            for timeframe in self.cfg.get("market.timeframes", []):
+        for symbol in list(self.feed.pairs):
+            for timeframe in self.feed.timeframes:
                 sd = await asyncio.to_thread(self._analyze_pair, symbol, timeframe)
                 if sd is not None:
                     self.publish({"type": "signal", "signal": sd})
                     new_signals.append(sd)
         return new_signals
+
+    # --- universo dinâmico (screener) ---
+    async def refresh_universe(self) -> dict:
+        """Re-roda o screener e aplica o diff no feed.
+
+        Proteção: par com posição paper aberta nunca é removido — o stream
+        precisa continuar vivo para proteger o stop.
+        """
+        if self.screener is None:
+            return {"added": [], "removed": [], "pairs": list(self.feed.pairs)}
+        universe = await asyncio.to_thread(self.screener.screen)
+        target = {u["symbol"] for u in universe}
+        current = set(self.feed.pairs)
+        open_symbols = {
+            p["symbol"] for p in await asyncio.to_thread(self.portfolio.open_positions)
+        }
+        to_add = sorted(target - current)
+        to_remove = sorted(current - target - open_symbols)
+        kept_open = sorted((current - target) & open_symbols)
+        for symbol in to_add:
+            await self.feed.add_pair(symbol)
+        for symbol in to_remove:
+            await self.feed.remove_pair(symbol)
+        if kept_open:
+            log.info("universo: %s mantidos (posição aberta)", kept_open)
+        diff = {"added": to_add, "removed": to_remove, "pairs": list(self.feed.pairs)}
+        if to_add or to_remove:
+            self.publish({"type": "universe", **diff})
+            log.info("universo atualizado: +%s -%s", to_add, to_remove)
+        return diff
+
+    def start_refresh_loop(self) -> None:
+        if self.screener is None or self._refresh_task is not None:
+            return
+        hours = self.cfg.get("screener.refresh_hours", 6)
+
+        async def loop():
+            while True:
+                await asyncio.sleep(hours * 3600)
+                try:
+                    await self.refresh_universe()
+                except Exception:
+                    log.exception("falha no refresh do universo")
+
+        self._refresh_task = asyncio.get_running_loop().create_task(loop())
+
+    async def stop_refresh_loop(self) -> None:
+        if self._refresh_task is not None:
+            self._refresh_task.cancel()
+            try:
+                await self._refresh_task
+            except asyncio.CancelledError:
+                pass
+            self._refresh_task = None
 
     def health(self) -> dict:
         return {"feed": self.feed.health(), "engine": dict(self.stats),
@@ -156,23 +212,40 @@ def _position_event(pos: dict) -> dict:
     }
 
 
+def build_live_components(cfg: Config) -> tuple[BaseFeed, TradingEngine]:
+    """Screener (se habilitado) → feed com o universo → engine. Usado por
+    `watch` e pelo lifespan do servidor."""
+    from app.data.feed import make_feed  # noqa: PLC0415
+    from app.screener import make_screener  # noqa: PLC0415
+
+    screener = None
+    pairs = None
+    if cfg.get("screener.enabled", True):
+        screener = make_screener(cfg)
+        universe = screener.screen()
+        pairs = [u["symbol"] for u in universe]
+    feed = make_feed(cfg, pairs)
+    engine = TradingEngine(cfg, feed, screener=screener)
+    return feed, engine
+
+
 async def run_live(cfg: Config) -> None:
     """Modo `watch`: feed + engine rodando em primeiro plano."""
-    from app.data.feed import make_feed  # noqa: PLC0415
-
-    feed = make_feed(cfg)
-    engine = TradingEngine(cfg, feed)
+    feed, engine = await asyncio.to_thread(build_live_components, cfg)
     await feed.start()
-    log.info("Engine ao vivo — Ctrl+C para sair")
+    engine.start_refresh_loop()
+    log.info("Engine ao vivo com %d pares — Ctrl+C para sair", len(feed.pairs))
     try:
         while True:
             await asyncio.sleep(60)
             health = engine.health()
             log.info(
-                "ticks=%s candles=%s sinais=%s",
+                "pares=%d ticks=%s candles=%s sinais=%s",
+                len(feed.pairs),
                 health["engine"]["ticks"],
                 health["engine"]["candles_closed"],
                 health["engine"]["signals"],
             )
     finally:
+        await engine.stop_refresh_loop()
         await feed.stop()
