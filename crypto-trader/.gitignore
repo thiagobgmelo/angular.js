@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.env
+paper_trading.db
+.pytest_cache/

@@ -1,0 +1,43 @@
+# Configuração do sistema de trading
+exchange:
+  id: binance          # qualquer id suportado pelo ccxt (bybit, okx, coinbase...)
+  rate_limit: true
+
+market:
+  pairs:
+    - BTC/USDT
+    - ETH/USDT
+    - SOL/USDT
+    - BNB/USDT
+  timeframes:
+    - 15m
+    - 1h
+    - 4h
+    - 1d
+  candles: 400         # candles buscados por análise (mín. ~250 p/ EMA 200)
+
+strategy:
+  score_threshold: 4       # score mínimo de confluência para emitir sinal
+  min_risk_reward: 1.5     # R:R mínimo até o TP1
+  rsi_period: 14
+  rsi_overbought: 70
+  rsi_oversold: 30
+  ema_fast: 50
+  ema_slow: 200
+  atr_period: 14
+  bb_period: 20
+  bb_std: 2.0
+  volume_ma: 20
+  swing_lookback: 5        # candles de cada lado para fractal de swing
+  sr_zone_tolerance: 0.005 # 0.5% para agrupar pivôs em zonas de S/R
+
+risk:
+  account_equity: 10000    # capital inicial da carteira paper (USDT)
+  risk_per_trade: 0.01     # 1% de risco por trade
+  max_open_positions: 5
+
+paper:
+  db_path: paper_trading.db
+
+scanner:
+  interval_seconds: 300    # intervalo do loop contínuo (modo watch)

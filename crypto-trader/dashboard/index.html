@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>Crypto Trader — Análise Técnica</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Crypto Trader</h1>
+    <div class="controls">
+      <select id="pair"></select>
+      <select id="timeframe"></select>
+      <button id="refresh" title="Atualizar análise">Atualizar</button>
+      <button id="scan" title="Escanear todos os pares e gerar sinais">Escanear tudo</button>
+    </div>
+    <div class="equity" id="equity-badge">—</div>
+  </header>
+
+  <main>
+    <section class="chart-panel">
+      <div id="chart"></div>
+      <div class="chart-legend" id="chart-legend">
+        <span class="key"><i class="swatch" style="background:#3987e5"></i>EMA 50</span>
+        <span class="key"><i class="swatch" style="background:#c98500"></i>EMA 200</span>
+        <span class="key"><i class="dash" style="border-color:#e66767"></i>Stop</span>
+        <span class="key"><i class="dash" style="border-color:#199e70"></i>Alvos</span>
+      </div>
+      <div class="analysis-box" id="analysis-box">Carregando análise…</div>
+    </section>
+
+    <aside class="side-panel">
+      <section class="card" id="signal-card">
+        <h2>Sinal atual</h2>
+        <div id="signal-body" class="muted">—</div>
+      </section>
+      <section class="card">
+        <h2>Sinais recentes</h2>
+        <div id="signals-list" class="muted">—</div>
+      </section>
+      <section class="card">
+        <h2>Carteira paper</h2>
+        <div id="portfolio-body" class="muted">—</div>
+      </section>
+    </aside>
+  </main>
+
+  <script src="/static/vendor/lightweight-charts.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
