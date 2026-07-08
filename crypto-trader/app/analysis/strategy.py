@@ -59,48 +59,69 @@ def analyze(
 
     long_score, short_score = 0, 0
     long_why, short_why = [], []
+    criteria: list[dict] = []
+
+    def crit(cid: str, label: str, long_ok: bool, short_ok: bool, value: str,
+             long_reason: str | None = None, short_reason: str | None = None) -> None:
+        """Registra o critério no checklist e aplica pontuação/racional."""
+        nonlocal long_score, short_score
+        criteria.append({
+            "id": cid, "label": label,
+            "long": bool(long_ok), "short": bool(short_ok), "value": value,
+        })
+        if long_ok:
+            long_score += 1
+            long_why.append(long_reason or label)
+        if short_ok:
+            short_score += 1
+            short_why.append(short_reason or label)
 
     # 1. Estrutura de mercado (Dow)
-    if structure == "uptrend":
-        long_score += 1
-        long_why.append("Estrutura de alta (topos e fundos ascendentes)")
-    elif structure == "downtrend":
-        short_score += 1
-        short_why.append("Estrutura de baixa (topos e fundos descendentes)")
+    crit(
+        "structure", "Estrutura de mercado (Dow)",
+        structure == "uptrend", structure == "downtrend",
+        {"uptrend": "alta", "downtrend": "baixa", "range": "lateral"}[structure],
+        "Estrutura de alta (topos e fundos ascendentes)",
+        "Estrutura de baixa (topos e fundos descendentes)",
+    )
 
     # 2. Tendência por EMAs
-    if pd.notna(last["ema_slow"]):
-        if price > last["ema_fast"] > last["ema_slow"]:
-            long_score += 1
-            long_why.append("Preço acima das EMAs 50>200 (tendência de alta)")
-        elif price < last["ema_fast"] < last["ema_slow"]:
-            short_score += 1
-            short_why.append("Preço abaixo das EMAs 50<200 (tendência de baixa)")
+    ema_ok = pd.notna(last["ema_slow"])
+    crit(
+        "emas", "Tendência EMA 50/200",
+        ema_ok and price > last["ema_fast"] > last["ema_slow"],
+        ema_ok and price < last["ema_fast"] < last["ema_slow"],
+        f"EMA50 {last['ema_fast']:.6g} · EMA200 {last['ema_slow']:.6g}" if ema_ok else "aquecendo",
+        "Preço acima das EMAs 50>200 (tendência de alta)",
+        "Preço abaixo das EMAs 50<200 (tendência de baixa)",
+    )
 
     # 3. RSI: zona + divergência. Extremo de RSI contra a tendência vigente não
     # pontua ("sobrevendido pode continuar sobrevendido"); reversão exige divergência.
     rsi_val = float(last["rsi"]) if pd.notna(last["rsi"]) else 50.0
     rsi_long = rsi_val <= scfg.get("rsi_oversold", 30) and structure != "downtrend"
     rsi_short = rsi_val >= scfg.get("rsi_overbought", 70) and structure != "uptrend"
-    if rsi_long or divergence == "bullish":
-        long_score += 1
-        long_why.append(
-            f"RSI {rsi_val:.0f} sobrevendido" if rsi_long else "Divergência de alta no RSI"
-        )
-    if rsi_short or divergence == "bearish":
-        short_score += 1
-        short_why.append(
-            f"RSI {rsi_val:.0f} sobrecomprado" if rsi_short else "Divergência de baixa no RSI"
-        )
+    div_note = f" · divergência de {'alta' if divergence == 'bullish' else 'baixa'}"
+    rsi_value = f"RSI {rsi_val:.1f}" + (div_note if divergence else "")
+    crit(
+        "rsi", "RSI (zona + divergência)",
+        rsi_long or divergence == "bullish",
+        rsi_short or divergence == "bearish",
+        rsi_value,
+        f"RSI {rsi_val:.0f} sobrevendido" if rsi_long else "Divergência de alta no RSI",
+        f"RSI {rsi_val:.0f} sobrecomprado" if rsi_short else "Divergência de baixa no RSI",
+    )
 
     # 4. MACD
-    if pd.notna(last["macd"]):
-        if last["macd"] > last["signal"] and last["histogram"] > 0:
-            long_score += 1
-            long_why.append("MACD acima da linha de sinal")
-        elif last["macd"] < last["signal"] and last["histogram"] < 0:
-            short_score += 1
-            short_why.append("MACD abaixo da linha de sinal")
+    macd_ok = pd.notna(last["macd"])
+    crit(
+        "macd", "MACD (12,26,9)",
+        macd_ok and last["macd"] > last["signal"] and last["histogram"] > 0,
+        macd_ok and last["macd"] < last["signal"] and last["histogram"] < 0,
+        f"histograma {last['histogram']:+.4g}" if macd_ok else "aquecendo",
+        "MACD acima da linha de sinal",
+        "MACD abaixo da linha de sinal",
+    )
 
     # 5. Localização: preço em zona de S/R ou nível de Fibonacci
     at_support = levels.in_zone(price, support, tolerance * 2)
@@ -110,41 +131,50 @@ def analyze(
         for key, lvl in fib.items()
         if key in ("0.382", "0.500", "0.618")
     )
-    if at_support or (near_fib and structure == "uptrend"):
-        long_score += 1
-        long_why.append(
-            "Preço testando zona de suporte"
-            if at_support
-            else "Preço em retração de Fibonacci na tendência de alta"
-        )
-    if at_resistance or (near_fib and structure == "downtrend"):
-        short_score += 1
-        short_why.append(
-            "Preço testando zona de resistência"
-            if at_resistance
-            else "Preço em retração de Fibonacci na tendência de baixa"
-        )
+    loc_bits = []
+    if at_support:
+        loc_bits.append("em suporte")
+    if at_resistance:
+        loc_bits.append("em resistência")
+    if near_fib:
+        loc_bits.append("em nível de Fibonacci")
+    crit(
+        "location", "Localização (S/R + Fibonacci)",
+        at_support or (near_fib and structure == "uptrend"),
+        at_resistance or (near_fib and structure == "downtrend"),
+        ", ".join(loc_bits) or "longe de zonas de interesse",
+        "Preço testando zona de suporte" if at_support
+        else "Preço em retração de Fibonacci na tendência de alta",
+        "Preço testando zona de resistência" if at_resistance
+        else "Preço em retração de Fibonacci na tendência de baixa",
+    )
 
     # 6. Padrão de candle (vale mais quando em zona relevante)
     bullish_pattern = patterns.BULLISH.intersection(candle_patterns)
     bearish_pattern = patterns.BEARISH.intersection(candle_patterns)
-    if bullish_pattern and (at_support or near_fib or rsi_val <= 40):
-        long_score += 1
-        names = ", ".join(bullish_pattern)
-        long_why.append(f"Padrão de reversão de alta ({names}) em região de interesse")
-    if bearish_pattern and (at_resistance or near_fib or rsi_val >= 60):
-        short_score += 1
-        names = ", ".join(bearish_pattern)
-        short_why.append(f"Padrão de reversão de baixa ({names}) em região de interesse")
+    crit(
+        "pattern", "Padrão de candle (Nison)",
+        bool(bullish_pattern and (at_support or near_fib or rsi_val <= 40)),
+        bool(bearish_pattern and (at_resistance or near_fib or rsi_val >= 60)),
+        ", ".join(candle_patterns) or "nenhum",
+        f"Padrão de reversão de alta ({', '.join(bullish_pattern)}) em região de interesse",
+        f"Padrão de reversão de baixa ({', '.join(bearish_pattern)}) em região de interesse",
+    )
 
     # 7. Volume confirmando o último candle
-    if pd.notna(last["volume_ma"]) and last["volume"] > last["volume_ma"]:
-        if last["close"] > last["open"]:
-            long_score += 1
-            long_why.append("Volume acima da média confirmando candle de alta")
-        elif last["close"] < last["open"]:
-            short_score += 1
-            short_why.append("Volume acima da média confirmando candle de baixa")
+    vol_ok = pd.notna(last["volume_ma"]) and last["volume"] > last["volume_ma"]
+    vol_ratio = (
+        f"{last['volume'] / last['volume_ma']:.1f}× a média"
+        if pd.notna(last["volume_ma"]) and last["volume_ma"] > 0 else "aquecendo"
+    )
+    crit(
+        "volume", "Volume de confirmação",
+        bool(vol_ok and last["close"] > last["open"]),
+        bool(vol_ok and last["close"] < last["open"]),
+        vol_ratio,
+        "Volume acima da média confirmando candle de alta",
+        "Volume acima da média confirmando candle de baixa",
+    )
 
     context = {
         "symbol": symbol,
@@ -156,8 +186,12 @@ def analyze(
         "atr": float(last["atr"]) if pd.notna(last["atr"]) else None,
         "support": support.price if support else None,
         "resistance": resistance.price if resistance else None,
+        "zones": [
+            {"price": z.price, "touches": z.touches, "kind": z.kind} for z in zones
+        ],
         "fibonacci": fib,
         "patterns": candle_patterns,
+        "criteria": criteria,
         "long_score": long_score,
         "short_score": short_score,
         "max_score": MAX_SCORE,

@@ -1,0 +1,29 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env            # API_TOKEN, TELEGRAM_*, EXCHANGE_ID...
+    volumes:
+      - trader-data:/data     # SQLite persistente
+    # sem portas publicadas: só o Caddy fala com o app.
+    # para acesso direto sem Caddy (ex.: via Tailscale), descomente:
+    # ports:
+    #   - "127.0.0.1:8000:8000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  trader-data:
+  caddy-data:
+  caddy-config:

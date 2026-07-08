@@ -64,6 +64,12 @@ def validate(cfg: Config) -> None:
     max_pos = cfg.get("risk.max_open_positions", 5)
     if max_pos < 1:
         problems.append(f"risk.max_open_positions deve ser >= 1; recebido {max_pos}")
+    max_lev = cfg.get("risk.max_leverage", 10)
+    if not 1 <= max_lev <= 100:
+        problems.append(f"risk.max_leverage deve estar em [1, 100]; recebido {max_lev}")
+    liq_buffer = cfg.get("risk.liq_buffer", 3.0)
+    if liq_buffer < 1.5:
+        problems.append(f"risk.liq_buffer deve ser >= 1.5; recebido {liq_buffer}")
     if cfg.get("screener.enabled", True):
         max_pairs = cfg.get("screener.max_pairs", 25)
         if not 1 <= max_pairs <= 100:
@@ -76,6 +82,15 @@ def validate(cfg: Config) -> None:
             problems.append("screener.min_quote_volume_24h não pode ser negativo")
     if problems:
         raise ValueError("Configuração inválida:\n  - " + "\n  - ".join(problems))
+
+
+def db_path(cfg: Config) -> Path:
+    """Caminho do SQLite: CRYPTO_TRADER_DB_DIR (deploy/volume) sobrepõe o dir."""
+    p = Path(cfg.get("paper.db_path", "paper_trading.db"))
+    env_dir = os.environ.get("CRYPTO_TRADER_DB_DIR")
+    if env_dir:
+        return Path(env_dir) / p.name
+    return p if p.is_absolute() else PROJECT_ROOT / p
 
 
 def load_config(path: Path = CONFIG_PATH) -> Config:

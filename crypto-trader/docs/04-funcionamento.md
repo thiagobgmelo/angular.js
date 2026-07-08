@@ -85,6 +85,18 @@ avaliados. Cada um a favor de um lado soma 1 ponto:
 15m/1h → *day trade*. Cada sinal carrega o racional legível (a lista dos
 critérios que pontuaram) — visível no dashboard e no alerta do Telegram.
 
+## Radar — oportunidades em formação
+
+Nem toda análise vira sinal — e é útil saber o que está *quase* virando. Ao
+fechar cada candle, se o lado dominante atinge `radar.min_score` (default 3)
+sem completar as condições de sinal, o sistema emite um **aviso de radar** com
+timestamp, score e o que falta (pontos de confluência, dominância ou R:R).
+Os avisos: aparecem no card "Radar" do dashboard em tempo real (SSE), têm link
+para abrir o gráfico do par, ficam **persistidos** (`radar_events` no SQLite,
+`GET /api/radar`) para análise futura, e ganham o selo **✓ confirmada** quando
+um sinal real do mesmo par/timeframe/direção sai em até 24 h (promoção
+automática — o sinal em si já vai à tela principal pelo fluxo normal).
+
 ## Gestão de risco (RiskManager)
 
 - **Risco fixo por trade**: 1% do capital (`risk.risk_per_trade`). O tamanho
@@ -95,6 +107,11 @@ critérios que pontuaram) — visível no dashboard e no alerta do Telegram.
 - **Alvos**: TP1 = 1,5R · TP2 = 2,5R · TP3 = próxima zona de S/R (ou 4R).
 - **Máximo de posições simultâneas**: `risk.max_open_positions` (default 5).
 - Sinal que não passa no R:R mínimo é descartado antes de virar posição.
+- **Alavancagem sugerida** (perpétuos — [ADR-014](02-decisoes-de-arquitetura.md#adr-014--alavancagem-sugerida-derivada-do-stop-v5)):
+  o risco por trade não muda com alavancagem (sizing é pelo stop); a sugestão
+  é a maior alavancagem que mantém a liquidação ≥ `risk.liq_buffer` (3×) além
+  do stop, com teto `risk.max_leverage` (10x). Cada sinal traz o valor, a
+  margem imobilizada, a liquidação estimada e o racional em texto.
 
 ## Ciclo de vida de um trade (paper)
 

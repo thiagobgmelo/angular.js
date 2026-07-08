@@ -49,6 +49,11 @@ risk:
   account_equity: 10000    # capital inicial da carteira paper (USDT)
   risk_per_trade: 0.01     # 1% de risco por trade
   max_open_positions: 5
+  max_leverage: 10         # teto da alavancagem sugerida (perpétuos)
+  liq_buffer: 3.0          # liquidação deve ficar >= 3x além da distância do stop
+
+radar:
+  min_score: 3             # score mínimo para aviso de oportunidade em formação
 
 paper:
   db_path: paper_trading.db

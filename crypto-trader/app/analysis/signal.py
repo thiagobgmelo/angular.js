@@ -24,6 +24,11 @@ class Signal:
     max_score: int                  # máximo possível
     position_size: float = 0.0      # unidades do ativo (definido pelo risk manager)
     risk_amount: float = 0.0        # valor em quote arriscado
+    suggested_leverage: int = 1     # alavancagem sugerida (perpétuos; ver RiskManager)
+    margin_required: float = 0.0    # margem imobilizada com a alavancagem sugerida
+    liquidation_price_est: float | None = None  # estimativa (margem isolada)
+    leverage_rationale: str = ""
+    context: dict = field(default_factory=dict)  # snapshot do cenário da análise
     rationale: list[str] = field(default_factory=list)
     created_at: str = field(
         default_factory=lambda: datetime.now(UTC).isoformat()

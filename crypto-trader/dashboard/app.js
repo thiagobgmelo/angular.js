@@ -40,34 +40,90 @@
     color: "#c98500", lineWidth: 2, priceLineVisible: false, lastValueVisible: false,
   });
   let priceLines = [];
+  let contextLines = [];
 
-  function clearPriceLines() {
-    priceLines.forEach((pl) => candles.removePriceLine(pl));
-    priceLines = [];
+  const mkLine = (bucket) => (price, title, color, style, axisLabel) => {
+    bucket.push(
+      candles.createPriceLine({
+        price, title, color,
+        lineWidth: 1,
+        lineStyle: style ?? LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: axisLabel !== false,
+      })
+    );
+  };
+
+  function clearLines(bucket) {
+    bucket.forEach((pl) => candles.removePriceLine(pl));
+    bucket.length = 0;
   }
 
   function drawSignalLevels(signal) {
-    clearPriceLines();
+    clearLines(priceLines);
     if (!signal) return;
-    const mk = (price, title, color, style) =>
-      priceLines.push(
-        candles.createPriceLine({
-          price, title, color,
-          lineWidth: 1,
-          lineStyle: style ?? LightweightCharts.LineStyle.Dashed,
-          axisLabelVisible: true,
-        })
-      );
+    const mk = mkLine(priceLines);
     mk(signal.entry, "entrada", "#c3c2b7", LightweightCharts.LineStyle.Solid);
     mk(signal.stop, "stop", "#e66767");
     signal.targets.forEach((t, i) => mk(t, "TP" + (i + 1), "#199e70"));
+    if (signal.liquidation_price_est) {
+      mk(signal.liquidation_price_est, "liq.est", "#8a3535");
+    }
+  }
+
+  function drawContextOverlays(ctx) {
+    // cenário da análise: zonas de S/R + níveis de Fibonacci + padrão de candle
+    clearLines(contextLines);
+    const mk = mkLine(contextLines);
+    const zones = ctx.zones || [];
+    const supports = zones.filter((z) => z.kind === "support")
+      .sort((a, b) => b.price - a.price).slice(0, 3);
+    const resistances = zones.filter((z) => z.kind === "resistance")
+      .sort((a, b) => a.price - b.price).slice(0, 3);
+    supports.forEach((z) => mk(z.price, `S (${z.touches}t)`, "#6f6e64",
+      LightweightCharts.LineStyle.Dashed, false));
+    resistances.forEach((z) => mk(z.price, `R (${z.touches}t)`, "#6f6e64",
+      LightweightCharts.LineStyle.Dashed, false));
+    const fib = ctx.fibonacci || {};
+    for (const key of ["0.382", "0.500", "0.618"]) {
+      if (fib[key] != null) {
+        mk(fib[key], "Fib " + (parseFloat(key) * 100).toFixed(1) + "%",
+          "#4a3aa7", LightweightCharts.LineStyle.Dotted, false);
+      }
+    }
+    // marcador do padrão de candle no último candle fechado
+    if (ctx.patterns && ctx.patterns.length && lastRows.length >= 2) {
+      const t = lastRows[lastRows.length - 2].time;
+      candles.setMarkers([{
+        time: t,
+        position: "belowBar",
+        color: "#c98500",
+        shape: "arrowUp",
+        text: ctx.patterns.join(","),
+      }]);
+    } else {
+      candles.setMarkers([]);
+    }
   }
 
   // ---------- estado ----------
   let cfg = { pairs: ["BTC/USDT"], timeframes: ["4h"] };
 
-  async function api(path, opts) {
+  // token de acesso (deploy com API_TOKEN); guardado uma vez no localStorage
+  const getToken = () => localStorage.getItem("api_token") || "";
+
+  async function api(path, opts, retried) {
+    opts = opts || {};
+    const token = getToken();
+    opts.headers = Object.assign({}, opts.headers,
+      token ? { Authorization: "Bearer " + token } : {});
     const resp = await fetch(path, opts);
+    if (resp.status === 401 && !retried) {
+      const t = window.prompt("Token de acesso (API_TOKEN do servidor):");
+      if (t) {
+        localStorage.setItem("api_token", t.trim());
+        return api(path, opts, true);
+      }
+    }
     if (!resp.ok) {
       let detail = resp.statusText;
       try {
@@ -96,6 +152,7 @@
 
   // último candle exibido (em formação) — atualizado ao vivo pelos ticks
   let lastCandle = null;
+  let lastRows = [];
   let tfSeconds = 14400;
   const TF_SECONDS = { "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
                        "1h": 3600, "4h": 14400, "1d": 86400 };
@@ -111,6 +168,7 @@
     })));
     emaFast.setData(rows.filter((r) => r.ema_fast != null).map((r) => ({ time: r.time, value: r.ema_fast })));
     emaSlow.setData(rows.filter((r) => r.ema_slow != null).map((r) => ({ time: r.time, value: r.ema_slow })));
+    lastRows = rows;
     lastCandle = rows.length ? {
       time: rows[rows.length - 1].time,
       open: rows[rows.length - 1].open, high: rows[rows.length - 1].high,
@@ -122,13 +180,19 @@
   function renderAnalysis(ctx) {
     const box = $("analysis-box");
     const structureLabel = { uptrend: "Alta", downtrend: "Baixa", range: "Lateral" }[ctx.structure] || ctx.structure;
-    const lines = [
-      `Preço: ${fmt(ctx.price)}   Estrutura: ${structureLabel}   RSI: ${fmt(ctx.rsi, 1)}`,
-      `Suporte: ${fmt(ctx.support)}   Resistência: ${fmt(ctx.resistance)}`,
-      `Confluência — LONG ${ctx.long_score}/${ctx.max_score} · SHORT ${ctx.short_score}/${ctx.max_score}`,
-    ];
-    if (ctx.patterns && ctx.patterns.length) lines.push(`Padrões: ${ctx.patterns.join(", ")}`);
-    box.textContent = lines.join("\n");
+    const head =
+      `Preço: <b>${fmt(ctx.price)}</b> · Estrutura: ${esc(structureLabel)} · ` +
+      `Suporte ${fmt(ctx.support)} · Resistência ${fmt(ctx.resistance)} · ` +
+      `Confluência <b>L${ctx.long_score}</b>/S<b>${ctx.short_score}</b> de ${ctx.max_score}`;
+    const rows = (ctx.criteria || []).map((c) =>
+      `<tr><td>${esc(c.label)}</td>` +
+      `<td class="${c.long ? "ok" : "no"}">${c.long ? "✓" : "—"}</td>` +
+      `<td class="${c.short ? "ok" : "no"}">${c.short ? "✓" : "—"}</td>` +
+      `<td>${esc(c.value)}</td></tr>`
+    ).join("");
+    box.innerHTML = `<div>${head}</div>` + (rows
+      ? `<table class="crit"><thead><tr><th>Critério</th><th>Long</th><th>Short</th><th>Leitura</th></tr></thead><tbody>${rows}</tbody></table>`
+      : "");
   }
 
   function signalHtml(s, withRationale) {
@@ -139,11 +203,24 @@
       withRationale && s.rationale && s.rationale.length
         ? `<ul class="rationale">${s.rationale.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>`
         : "";
+    const riskDist = Math.abs(s.entry - s.stop);
+    const targetLines = s.targets.map((t, i) => {
+      const rr = riskDist > 0 ? (Math.abs(t - s.entry) / riskDist).toFixed(1) : "?";
+      const pct = ((t - s.entry) / s.entry) * 100;
+      return `TP${i + 1} ${fmt(t)} <span class="muted">(${rr}R · ${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)</span>`;
+    }).join("<br>");
+    const stopPct = ((s.stop - s.entry) / s.entry) * 100;
+    const lev = withRationale && s.suggested_leverage > 1
+      ? `<div class="lev-box">Alavancagem sugerida: <b>${esc(s.suggested_leverage)}x</b> · ` +
+        `margem ~${fmt(s.margin_required)} USDT · liq. est. ${fmt(s.liquidation_price_est)}<br>` +
+        `<span class="muted">${esc(s.leverage_rationale || "")}</span></div>`
+      : "";
     return `<div class="sig">
       <div class="head"><span class="${dirClass}">${dirLabel}</span>
         <span>${esc(s.symbol)} · ${esc(s.timeframe)} · ${kind} · ${esc(s.score)}/${esc(s.max_score)}</span></div>
-      <div class="lvls">Entrada ${fmt(s.entry)} · Stop ${fmt(s.stop)}<br>
-        Alvos ${s.targets.map((t) => fmt(t)).join(" / ")}</div>
+      <div class="lvls">Entrada ${fmt(s.entry)} · Stop ${fmt(s.stop)} <span class="muted">(${stopPct.toFixed(1)}%)</span><br>
+        ${targetLines}</div>
+      ${lev}
       <div class="when">${esc(new Date(s.created_at).toLocaleString("pt-BR"))}</div>
       ${rationale}</div>`;
   }
@@ -155,10 +232,47 @@
     );
     renderAnalysis(context);
     drawSignalLevels(signal);
+    drawContextOverlays(context);
     $("signal-body").innerHTML = signal
       ? signalHtml(signal, true)
       : '<span class="muted">Sem sinal — confluência insuficiente no momento.</span>';
   }
+
+  function radarItemHtml(r) {
+    const dirClass = r.direction === "long" ? "dir-long" : "dir-short";
+    const promoted = r.promoted_signal_id
+      ? ' <span class="badge-promoted">✓ confirmada</span>' : "";
+    return `<div class="radar-item">
+      <div class="head">
+        <span class="when">${esc(new Date(r.created_at).toLocaleString("pt-BR"))}</span>
+        <span class="${dirClass}">${r.direction === "long" ? "LONG" : "SHORT"}</span>
+        <span>${esc(r.symbol)} · ${esc(r.timeframe)} · ${esc(r.score)}/${esc(r.max_score)}</span>${promoted}
+      </div>
+      <div class="missing">${esc(r.missing)} @ ${fmt(r.price)}</div>
+      <a data-symbol="${esc(r.symbol)}" data-tf="${esc(r.timeframe)}">abrir gráfico →</a>
+    </div>`;
+  }
+
+  async function loadRadar() {
+    const rows = await api("/api/radar?limit=40");
+    $("radar-list").innerHTML = rows.length
+      ? rows.map(radarItemHtml).join("")
+      : '<span class="muted">Nenhuma formação detectada ainda — o radar acumula avisos aqui.</span>';
+  }
+
+  // link "abrir gráfico" do radar (delegação de evento)
+  $("radar-list").addEventListener("click", (e) => {
+    const a = e.target.closest("a[data-symbol]");
+    if (!a) return;
+    const pairSel = $("pair"), tfSel = $("timeframe");
+    if ([...pairSel.options].some((o) => o.value === a.dataset.symbol)) {
+      pairSel.value = a.dataset.symbol;
+    }
+    if ([...tfSel.options].some((o) => o.value === a.dataset.tf)) {
+      tfSel.value = a.dataset.tf;
+    }
+    refreshAll();
+  });
 
   async function loadSignals() {
     const rows = await api("/api/signals?limit=12");
@@ -195,7 +309,7 @@
 
   async function refreshAll() {
     try {
-      await Promise.all([loadChart(), loadAnalysis(), loadSignals(), loadPortfolio()]);
+      await Promise.all([loadChart(), loadAnalysis(), loadSignals(), loadPortfolio(), loadRadar()]);
     } catch (err) {
       $("analysis-box").textContent = "Erro: " + err.message;
     }
@@ -261,13 +375,23 @@
   }
 
   function connectStream() {
-    const es = new EventSource("/api/stream");
+    const token = getToken();
+    const es = new EventSource(
+      "/api/stream" + (token ? "?token=" + encodeURIComponent(token) : "")
+    );
     es.onopen = () => { sseAlive = true; };
     es.onerror = () => { sseAlive = false; };  // EventSource reconecta sozinho
     es.addEventListener("tick", (e) => onTick(JSON.parse(e.data)));
     es.addEventListener("candle", (e) => onCandle(JSON.parse(e.data)));
-    es.addEventListener("signal", () => { loadSignals(); loadAnalysis(); loadPortfolio(); });
+    es.addEventListener("signal", () => { loadSignals(); loadAnalysis(); loadPortfolio(); loadRadar(); });
     es.addEventListener("position", () => loadPortfolio());
+    es.addEventListener("radar", (e) => {
+      const d = JSON.parse(e.data);
+      const list = $("radar-list");
+      const empty = list.querySelector(".muted");
+      if (empty) list.innerHTML = "";
+      list.insertAdjacentHTML("afterbegin", radarItemHtml(d.radar));
+    });
     es.addEventListener("universe", (e) => {
       const d = JSON.parse(e.data);
       setPairOptions(d.pairs); // universo do screener mudou

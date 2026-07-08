@@ -122,10 +122,26 @@ em memória que emite eventos — nada de polling:
 
 `python -m app.main serve` e abra <http://localhost:8000>:
 
-- Gráfico de candles com EMA 50/200 e níveis do sinal (entrada, stop, alvos)
-- Painel do sinal atual com score e racional de cada critério
+- Gráfico com o **cenário completo**: EMAs, zonas de S/R, níveis de Fibonacci,
+  marcador do padrão de candle e níveis do sinal (entrada, stop, TP1–3, liq.)
+- **Checklist dos 7 critérios** com ✓/✗ por lado e a leitura de cada um —
+  os porquês de toda sugestão de entrada
+- **Radar de oportunidades em formação**: avisos com timestamp do que está
+  quase virando sinal (e o que falta), link "abrir gráfico" e selo
+  "✓ confirmada" quando a formação se completa; histórico persistido em
+  `/api/radar` para análise futura
+- Sinal com **alavancagem sugerida** (perpétuos): valor, margem imobilizada,
+  liquidação estimada e o racional — regra: máxima alavancagem que mantém a
+  liquidação ≥ 3× além do stop, teto 10x (`risk.max_leverage`)
 - Sinais recentes e carteira paper (equity, win rate, profit factor, posições)
-- Botão **Escanear tudo** dispara o scanner por cima de todos os pares
+- Botão **Escanear tudo** dispara a análise imediata de todos os pares
+
+## Deploy (uso e acesso remoto)
+
+Artefatos prontos: `Dockerfile`, `docker-compose.yml` (app + Caddy com HTTPS
+automático) e autenticação por token (`API_TOKEN` no `.env` — exigido em toda
+a API quando definido). Runbook completo passo a passo, incluindo opções de
+**custo zero** (Oracle Cloud Always Free / Tailscale): [docs/05-deploy.md](docs/05-deploy.md).
 
 ## Alertas no Telegram (opcional)
 

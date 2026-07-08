@@ -256,3 +256,51 @@ gráfico para analisar (nem EMA200 diária). Os critérios ficam no config, à
 vista, ajustáveis e auditáveis: exatamente o que "critérios claros e
 validados" significa na prática. A filtragem é uma função pura
 (`select_universe`) testada com payloads realistas da exchange.
+
+---
+
+## ADR-014 — Alavancagem sugerida derivada do stop (v5)
+
+**Contexto**: o usuário quer operar perpétuos USDT na Bybit com alavancagem
+"efetiva e eficiente" e entender o porquê de cada sugestão.
+
+**Alternativas**: alavancagem fixa escolhida pelo usuário (ignora que cada
+setup tem stop diferente); alavancagem máxima da exchange (liquidação vira o
+stop de fato — inaceitável); dimensionar risco *pela* alavancagem (erro
+conceitual comum que transforma alavancagem em risco).
+
+**Decisão**: o risco por trade continua fixo (1% via distância do stop). A
+alavancagem sugerida é **a maior que mantém o preço de liquidação a pelo
+menos `liq_buffer` (3×) a distância do stop**, com teto `max_leverage` (10x,
+escolhido pelo usuário): `alav = min(⌊1/(3×dist_stop + mmr)⌋, 10)`, onde
+`mmr` ≈ 0,5% é a margem de manutenção. Cada sinal carrega alavancagem,
+margem imobilizada, liquidação estimada e o racional em texto.
+
+**Porquê**: com sizing por stop, alavancagem não muda o quanto se perde no
+stop — muda quanta margem fica presa e onde cai a liquidação. "Eficiente" é
+imobilizar o mínimo de margem; "efetivo e seguro" é garantir que a liquidação
+nunca aconteça antes do stop (por isso o buffer de 3× — nem um pavio violento
+que estoure o stop chega perto da liquidação). O racional em cada sinal torna
+a regra auditável. Riscos reais registrados: liquidação (mitigada pelo
+buffer), funding em posições longas no tempo (documentado como custo).
+
+---
+
+## ADR-015 — Autenticação por token + deploy Docker/Caddy (v5)
+
+**Contexto**: o sistema sai do localhost para "uso e acesso" remoto.
+
+**Alternativas**: login com usuário/senha e sessões (peso desnecessário para
+single-user); HTTP básico (sem logout/rotação limpa); OAuth (exagero).
+
+**Decisão**: token único (`API_TOKEN` env) exigido em `/api/*` via middleware
+com `secrets.compare_digest`; SSE autentica por query param (EventSource não
+envia headers). Sem a env definida, comportamento dev local (bind 127.0.0.1
+como proteção). Empacotamento: Docker (imagem non-root com healthcheck) +
+docker-compose com volume para o SQLite + Caddy para HTTPS automático;
+runbook em docs/05 com opções de custo zero (Oracle Always Free / Tailscale).
+
+**Porquê**: para um usuário único, um bearer token forte sobre HTTPS dá a
+mesma proteção prática que um sistema de login, com uma fração da superfície
+de ataque. Caddy elimina a gestão manual de certificados. O compose isola o
+app (sem porta pública direta — só o Caddy fala com ele).

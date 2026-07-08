@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.alerts import telegram
 from app.analysis import strategy
-from app.config import PROJECT_ROOT, Config
+from app.config import Config, db_path
 from app.data.exchange import make_client
 from app.paper.portfolio import PaperPortfolio
 from app.paper.store import Store
@@ -24,8 +24,7 @@ class Scanner:
         self.client = make_client(
             cfg.get("exchange.id", "binance"), cfg.get("exchange.rate_limit", True)
         )
-        db_path = PROJECT_ROOT / cfg.get("paper.db_path", "paper_trading.db")
-        self.store = Store(db_path)
+        self.store = Store(db_path(cfg))
         self.portfolio = PaperPortfolio(
             self.store, cfg.get("risk.account_equity", 10000.0)
         )

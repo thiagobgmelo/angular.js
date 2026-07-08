@@ -41,6 +41,16 @@ def format_signal(s: dict) -> str:
         f"Stop: <code>{s['stop']:g}</code>",
         f"Alvos: <code>{targets}</code>",
         f"Posição sugerida: {s['position_size']:g} (risco {s['risk_amount']:g} USDT)",
+    ]
+    lev = s.get("suggested_leverage")
+    if lev and lev > 1:
+        lines += [
+            f"Alavancagem sugerida: <b>{lev}x</b> "
+            f"(margem ~{s.get('margin_required', 0):g} USDT, "
+            f"liq. est. <code>{s.get('liquidation_price_est') or 0:g}</code>)",
+            f"<i>{html.escape(str(s.get('leverage_rationale', '')))}</i>",
+        ]
+    lines += [
         "",
         "Racional:",
     ]

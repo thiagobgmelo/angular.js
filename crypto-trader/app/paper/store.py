@@ -54,7 +54,29 @@ CREATE TABLE IF NOT EXISTS equity (
     at TEXT NOT NULL,
     value REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS radar_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    timeframe TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    score INTEGER NOT NULL,
+    max_score INTEGER NOT NULL,
+    missing TEXT NOT NULL,          -- o que falta para virar sinal
+    price REAL NOT NULL,
+    context TEXT NOT NULL DEFAULT '{}',
+    promoted_signal_id INTEGER REFERENCES signals(id)
+);
 """
+
+# migrações leves: colunas adicionadas após a v1 (ALTER se ausente)
+MIGRATIONS = [
+    ("signals", "context", "TEXT NOT NULL DEFAULT '{}'"),
+    ("signals", "suggested_leverage", "INTEGER NOT NULL DEFAULT 1"),
+    ("signals", "margin_required", "REAL NOT NULL DEFAULT 0"),
+    ("signals", "liquidation_price_est", "REAL"),
+    ("signals", "leverage_rationale", "TEXT NOT NULL DEFAULT ''"),
+]
 
 
 class Store:
@@ -64,6 +86,10 @@ class Store:
         self._lock = threading.Lock()
         with self._lock:
             self.conn.executescript(SCHEMA)
+            for table, column, decl in MIGRATIONS:
+                cols = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+                if column not in cols:
+                    self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
             self.conn.commit()
 
     # --- sinais ---
@@ -71,14 +97,21 @@ class Store:
         with self._lock:
             cur = self.conn.execute(
                 """INSERT INTO signals (created_at, symbol, timeframe, direction, trade_type,
-                     entry, stop, targets, score, max_score, position_size, risk_amount, rationale)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     entry, stop, targets, score, max_score, position_size, risk_amount,
+                     rationale, context, suggested_leverage, margin_required,
+                     liquidation_price_est, leverage_rationale)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     signal_dict["created_at"], signal_dict["symbol"], signal_dict["timeframe"],
                     signal_dict["direction"], signal_dict["trade_type"], signal_dict["entry"],
                     signal_dict["stop"], json.dumps(signal_dict["targets"]), signal_dict["score"],
                     signal_dict["max_score"], signal_dict["position_size"],
                     signal_dict["risk_amount"], json.dumps(signal_dict["rationale"]),
+                    json.dumps(signal_dict.get("context", {})),
+                    signal_dict.get("suggested_leverage", 1),
+                    signal_dict.get("margin_required", 0.0),
+                    signal_dict.get("liquidation_price_est"),
+                    signal_dict.get("leverage_rationale", ""),
                 ),
             )
             self.conn.commit()
@@ -107,7 +140,62 @@ class Store:
         d = dict(row)
         d["targets"] = json.loads(d["targets"])
         d["rationale"] = json.loads(d["rationale"])
+        d["context"] = json.loads(d.get("context") or "{}")
         return d
+
+    # --- radar (oportunidades em formação) ---
+    def save_radar_event(self, ev: dict) -> int:
+        with self._lock:
+            cur = self.conn.execute(
+                """INSERT INTO radar_events (created_at, symbol, timeframe, direction,
+                     score, max_score, missing, price, context)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (
+                    ev["created_at"], ev["symbol"], ev["timeframe"], ev["direction"],
+                    ev["score"], ev["max_score"], ev["missing"], ev["price"],
+                    json.dumps(ev.get("context", {})),
+                ),
+            )
+            self.conn.commit()
+            return cur.lastrowid
+
+    def recent_radar(self, limit: int = 100) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM radar_events ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["context"] = json.loads(d.get("context") or "{}")
+            out.append(d)
+        return out
+
+    def has_recent_radar(
+        self, symbol: str, timeframe: str, direction: str, since_iso: str
+    ) -> bool:
+        with self._lock:
+            row = self.conn.execute(
+                """SELECT 1 FROM radar_events
+                   WHERE symbol=? AND timeframe=? AND direction=? AND created_at >= ?
+                   LIMIT 1""",
+                (symbol, timeframe, direction, since_iso),
+            ).fetchone()
+        return row is not None
+
+    def promote_radar_events(
+        self, symbol: str, timeframe: str, direction: str, since_iso: str, signal_id: int
+    ) -> int:
+        """Marca eventos de radar recentes como confirmados pelo sinal."""
+        with self._lock:
+            cur = self.conn.execute(
+                """UPDATE radar_events SET promoted_signal_id=?
+                   WHERE symbol=? AND timeframe=? AND direction=? AND created_at >= ?
+                     AND promoted_signal_id IS NULL""",
+                (signal_id, symbol, timeframe, direction, since_iso),
+            )
+            self.conn.commit()
+            return cur.rowcount
 
     # --- posições ---
     def open_position(self, signal_id: int, signal_dict: dict) -> int:

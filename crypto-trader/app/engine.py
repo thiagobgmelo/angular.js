@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.alerts import telegram
 from app.analysis import strategy
-from app.config import PROJECT_ROOT, Config
+from app.config import Config, db_path
 from app.data.feed import BaseFeed, timeframe_seconds
 from app.paper.portfolio import PaperPortfolio
 from app.paper.store import Store
@@ -31,16 +31,20 @@ class TradingEngine:
         self.feed = feed
         self.screener = screener
         self._refresh_task: asyncio.Task | None = None
-        db_path = PROJECT_ROOT / cfg.get("paper.db_path", "paper_trading.db")
-        self.store = Store(db_path)
+        self.store = Store(db_path(cfg))
         self.portfolio = PaperPortfolio(self.store, cfg.get("risk.account_equity", 10000.0))
         self.risk = RiskManager(
             risk_per_trade=cfg.get("risk.risk_per_trade", 0.01),
             min_risk_reward=cfg.get("strategy.min_risk_reward", 1.5),
             max_open_positions=cfg.get("risk.max_open_positions", 5),
+            max_leverage=cfg.get("risk.max_leverage", 10),
+            liq_buffer=cfg.get("risk.liq_buffer", 3.0),
         )
         self._subscribers: set[asyncio.Queue] = set()
-        self.stats = {"candles_closed": 0, "ticks": 0, "signals": 0, "last_analysis_ms": None}
+        self.stats = {
+            "candles_closed": 0, "ticks": 0, "signals": 0,
+            "radar_events": 0, "last_analysis_ms": None,
+        }
         feed.on_candle_close(self.handle_candle_close)
         feed.on_tick(self.handle_tick)
 
@@ -80,8 +84,18 @@ class TradingEngine:
             },
         })
         started = time.perf_counter()
-        signal_dict = await asyncio.to_thread(self._analyze_pair, symbol, timeframe)
+        signal_dict, radar_dict = await asyncio.to_thread(
+            self._analyze_pair, symbol, timeframe
+        )
         self.stats["last_analysis_ms"] = round((time.perf_counter() - started) * 1000, 1)
+        if radar_dict is not None:
+            self.stats["radar_events"] += 1
+            self.publish({"type": "radar", "radar": radar_dict})
+            log.info(
+                "RADAR %s %s %s score %s/%s — %s",
+                radar_dict["direction"].upper(), symbol, timeframe,
+                radar_dict["score"], radar_dict["max_score"], radar_dict["missing"],
+            )
         if signal_dict is not None:
             self.stats["signals"] += 1
             self.publish({"type": "signal", "signal": signal_dict})
@@ -111,34 +125,95 @@ class TradingEngine:
                 )
 
     # --- análise (roda em thread; usa apenas o cache do feed) ---
-    def _analyze_pair(self, symbol: str, timeframe: str) -> dict | None:
+    def _analyze_pair(self, symbol: str, timeframe: str) -> tuple[dict | None, dict | None]:
+        """Retorna (sinal, evento de radar) — cada um pode ser None.
+
+        Radar = oportunidade em formação: o lado dominante atingiu
+        `radar.min_score` mas algo ainda falta para virar sinal completo.
+        """
         df = self.feed.df(symbol, timeframe)
         if len(df) < 60:
-            return None
+            return None, None
         scfg = self.cfg.get("strategy", {})
         # última linha é o candle em formação: análise usa só os fechados
-        signal, _ = strategy.analyze(df.iloc[:-1], symbol, timeframe, scfg)
-        if signal is None:
-            return None
-        dedup_h = DEDUP_HOURS.get(timeframe, 24)
+        signal, context = strategy.analyze(df.iloc[:-1], symbol, timeframe, scfg)
+
+        threshold = scfg.get("score_threshold", 4)
+        if signal is not None:
+            dedup_h = DEDUP_HOURS.get(timeframe, 24)
+            since = (datetime.now(UTC) - timedelta(hours=dedup_h)).isoformat()
+            if self.store.has_recent_signal(symbol, timeframe, signal.direction, since):
+                return None, None
+            open_count = len(self.portfolio.open_positions())
+            sized = self.risk.apply(signal, self.portfolio.equity, open_count)
+            if sized is None:
+                radar = self._emit_radar(
+                    context, signal.direction, signal.score,
+                    "carteira no limite de posições abertas",
+                )
+                return None, radar
+            sized.context = context
+            sd = sized.to_dict()
+            signal_id = self.store.save_signal(sd)
+            self.portfolio.open_from_signal(signal_id, sd)
+            promo_since = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
+            promoted = self.store.promote_radar_events(
+                symbol, timeframe, sized.direction, promo_since, signal_id
+            )
+            if promoted:
+                log.info("radar: %d aviso(s) confirmados pelo sinal %s", promoted, signal_id)
+            return sd, None
+
+        # sem sinal: avalia se há oportunidade em formação para o radar
+        long_s, short_s = context["long_score"], context["short_score"]
+        direction = "long" if long_s >= short_s else "short"
+        score, other = max(long_s, short_s), min(long_s, short_s)
+        radar_min = self.cfg.get("radar.min_score", max(threshold - 1, 1))
+        if score < radar_min:
+            return None, None
+        missing: list[str] = []
+        if score < threshold:
+            missing.append(f"falta(m) {threshold - score} ponto(s) de confluência")
+        if score >= threshold and score < other + 2:
+            missing.append(f"sem dominância clara (L{long_s}/S{short_s})")
+        if not missing:
+            # score e dominância ok, mas o sinal não saiu: reprovado no R:R/stop
+            missing.append("R:R até o TP1 abaixo do mínimo (ou stop inválido)")
+        return None, self._emit_radar(context, direction, score, "; ".join(missing))
+
+    def _emit_radar(
+        self, context: dict, direction: str, score: int, missing: str
+    ) -> dict | None:
+        """Persiste e retorna o evento de radar (None se dedup segurar)."""
+        symbol, timeframe = context["symbol"], context["timeframe"]
+        dedup_h = DEDUP_HOURS.get(timeframe, 24) * 0.5
         since = (datetime.now(UTC) - timedelta(hours=dedup_h)).isoformat()
-        if self.store.has_recent_signal(symbol, timeframe, signal.direction, since):
+        if self.store.has_recent_radar(symbol, timeframe, direction, since):
             return None
-        open_count = len(self.portfolio.open_positions())
-        sized = self.risk.apply(signal, self.portfolio.equity, open_count)
-        if sized is None:
-            return None
-        sd = sized.to_dict()
-        signal_id = self.store.save_signal(sd)
-        self.portfolio.open_from_signal(signal_id, sd)
-        return sd
+        ev = {
+            "created_at": datetime.now(UTC).isoformat(),
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "direction": direction,
+            "score": score,
+            "max_score": context["max_score"],
+            "missing": missing,
+            "price": context["price"],
+            "context": context,
+        }
+        ev["id"] = self.store.save_radar_event(ev)
+        ev["promoted_signal_id"] = None
+        return ev
 
     async def scan_all(self) -> list[dict]:
         """Análise imediata de todos os pares×timeframes a partir do cache."""
         new_signals = []
         for symbol in list(self.feed.pairs):
             for timeframe in self.feed.timeframes:
-                sd = await asyncio.to_thread(self._analyze_pair, symbol, timeframe)
+                sd, radar = await asyncio.to_thread(self._analyze_pair, symbol, timeframe)
+                if radar is not None:
+                    self.stats["radar_events"] += 1
+                    self.publish({"type": "radar", "radar": radar})
                 if sd is not None:
                     self.publish({"type": "signal", "signal": sd})
                     new_signals.append(sd)

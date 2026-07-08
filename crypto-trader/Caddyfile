@@ -1,0 +1,9 @@
+# HTTPS automático (Let's Encrypt) quando DOMAIN aponta para o servidor.
+# Com DOMAIN=localhost o Caddy usa certificado interno (para testes).
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy app:8000 {
+		# SSE: sem buffering
+		flush_interval -1
+	}
+}

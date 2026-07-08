@@ -11,9 +11,10 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from app import auth
 from app.analysis import indicators, strategy
 from app.backtest import engine as backtest_engine
 from app.config import PROJECT_ROOT, load_config
@@ -45,6 +46,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Crypto Trader", version="2.0", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def auth_middleware(request, call_next):
+    """Exige API_TOKEN em /api/* quando configurado (deploy exposto)."""
+    if request.url.path.startswith("/api") and not auth.request_authorized(request):
+        return JSONResponse({"detail": "Token de API ausente ou inválido"}, status_code=401)
+    return await call_next(request)
 
 
 def _validate_market(symbol: str, timeframe: str) -> None:
@@ -117,6 +126,12 @@ async def get_analysis(symbol: str = "BTC/USDT", timeframe: str = "4h"):
 @app.get("/api/signals")
 def get_signals(limit: int = Query(default=50, ge=1, le=500)):
     return _engine.store.recent_signals(limit)
+
+
+@app.get("/api/radar")
+def get_radar(limit: int = Query(default=100, ge=1, le=1000)):
+    """Histórico do radar: oportunidades em formação (log para análise futura)."""
+    return _engine.store.recent_radar(limit)
 
 
 @app.get("/api/portfolio")
