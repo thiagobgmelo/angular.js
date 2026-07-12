@@ -4,6 +4,20 @@ Runbook passo a passo para colocar o Crypto Trader no ar com HTTPS,
 autenticação e backup. Os artefatos (`Dockerfile`, `docker-compose.yml`,
 `Caddyfile`) já estão no repositório.
 
+## Caminho rápido — um comando (`deploy.sh`)
+
+Numa VPS Ubuntu/Debian recém-criada, o script de bootstrap faz tudo dos
+passos 1–3 sozinho (instala Docker, configura firewall, gera o `API_TOKEN`,
+pergunta domínio/Telegram/Bybit e sobe o sistema):
+
+```bash
+git clone <SEU_FORK> app && cd app/crypto-trader && bash deploy.sh
+```
+
+Ao final ele imprime a URL do dashboard e o token de acesso. É idempotente:
+rodar de novo atualiza sem perder dados. Os passos manuais abaixo continuam
+documentados para quem quiser entender ou personalizar cada etapa.
+
 ## Passo 0 — Escolher onde hospedar
 
 | Opção | Custo | Prós | Contras |

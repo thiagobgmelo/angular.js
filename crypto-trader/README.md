@@ -152,10 +152,16 @@ em memória que emite eventos — nada de polling:
 
 ## Deploy (uso e acesso remoto)
 
-Artefatos prontos: `Dockerfile`, `docker-compose.yml` (app + Caddy com HTTPS
-automático) e autenticação por token (`API_TOKEN` no `.env` — exigido em toda
-a API quando definido). Runbook completo passo a passo, incluindo opções de
-**custo zero** (Oracle Cloud Always Free / Tailscale): [docs/05-deploy.md](docs/05-deploy.md).
+**Um comando numa VPS Ubuntu/Debian nova**:
+
+```bash
+git clone <SEU_FORK> app && cd app/crypto-trader && bash deploy.sh
+```
+
+O `deploy.sh` instala Docker, configura firewall, gera o `API_TOKEN`,
+pergunta domínio/Telegram/Bybit e sobe tudo (app + Caddy com HTTPS
+automático). Runbook completo, incluindo opções de **custo zero** (Oracle
+Cloud Always Free / Tailscale): [docs/05-deploy.md](docs/05-deploy.md).
 
 ## Alertas no Telegram (opcional)
 
