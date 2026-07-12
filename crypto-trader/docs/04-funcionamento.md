@@ -133,6 +133,32 @@ Regras de realismo (viés conservador — [ADR-006](02-decisoes-de-arquitetura.m
 fills sempre no **nível exato** do stop/alvo; com granularidade de candle
 (backtest/backfill), stop e alvo no mesmo candle → assume stop primeiro.
 
+## Execução real (Bybit perpétuos)
+
+A execução é uma camada separada da análise
+([ADR-016](02-decisoes-de-arquitetura.md#adr-016--execução-real-com-modos-alternáveis-e-salvaguardas-em-camadas-v6)),
+com três modos **alternáveis em runtime** (`/modo` no Telegram, card
+"Execução" no dashboard ou `POST /api/execution/mode`):
+
+| Modo | Comportamento |
+|---|---|
+| `off` (default) | Só paper trading — nada vai à exchange |
+| `manual` | Sinal vira aprovação com validade de 15 min: botões ✅/❌ no Telegram e no dashboard; só executa após aprovar |
+| `auto` | Executa direto, protegido pelo circuit breaker |
+
+**Executor**: sem chaves no `.env` → **dry-run** (simula e audita, nada sai);
+com `BYBIT_API_KEY/SECRET` → Bybit real (`BYBIT_TESTNET=1` = sandbox).
+Ordens: entrada a mercado + TP1 (50%) e TP2 (25%) limit reduce-only + stop
+market reduce-only; TP1 atingido move o stop real para breakeven.
+
+**Circuit breaker** (config `execution.*`): perda diária ≥ 3% do capital,
+≥ 6 entradas/dia ou 3 erros de ordem seguidos → **pausa automática** + aviso
+no Telegram. Kill-switch manual: `/pausar`, botão no dashboard ou
+`POST /api/execution/pause`. Toda ação fica em `execution_log` (auditoria).
+
+**Roteiro de adoção obrigatório**: paper (semanas) → testnet → produção com
+capital pequeno. Chave de produção: **sem permissão de saque + IP whitelist**.
+
 ## Modos de operação
 
 | Comando | O que faz | Fonte de dados |

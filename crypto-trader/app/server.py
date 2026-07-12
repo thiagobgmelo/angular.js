@@ -38,10 +38,10 @@ async def lifespan(app: FastAPI):
     # o screener faz chamadas REST síncronas: roda em thread
     _feed, _engine = await asyncio.to_thread(build_live_components, _cfg)
     await _feed.start()
-    _engine.start_refresh_loop()
+    _engine.start_services()
     log.info("feed iniciado com %d pares; dados fluindo em memória", len(_feed.pairs))
     yield
-    await _engine.stop_refresh_loop()
+    await _engine.stop_services()
     await _feed.stop()
 
 
@@ -132,6 +132,53 @@ def get_signals(limit: int = Query(default=50, ge=1, le=500)):
 def get_radar(limit: int = Query(default=100, ge=1, le=1000)):
     """Histórico do radar: oportunidades em formação (log para análise futura)."""
     return _engine.store.recent_radar(limit)
+
+
+# --- execução real (modos off/manual/auto, aprovações, kill-switch) ---
+
+
+@app.get("/api/execution")
+def get_execution():
+    return _engine.execution.status()
+
+
+@app.post("/api/execution/mode")
+async def set_execution_mode(body: dict):
+    mode = str(body.get("mode", "")).lower()
+    try:
+        _engine.execution.set_mode(mode)
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+    return {"ok": True, "mode": mode}
+
+
+@app.post("/api/execution/pause")
+def pause_execution():
+    _engine.execution.pause("API")
+    return {"ok": True, "paused": True}
+
+
+@app.post("/api/execution/resume")
+def resume_execution():
+    _engine.execution.resume()
+    return {"ok": True, "paused": False}
+
+
+@app.post("/api/approvals/{approval_id}/{decision}")
+async def decide_approval(approval_id: int, decision: str):
+    if decision not in ("approve", "reject"):
+        raise HTTPException(status_code=422, detail="decisão deve ser approve|reject")
+    result = await _engine.execution.decide(
+        approval_id, approve=(decision == "approve"), via="dashboard"
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result.get("error", "falhou"))
+    return result
+
+
+@app.get("/api/execution/log")
+def get_execution_log(limit: int = Query(default=100, ge=1, le=1000)):
+    return _engine.store.execution_log_recent(limit)
 
 
 @app.get("/api/portfolio")

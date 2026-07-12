@@ -37,6 +37,18 @@
         <h2>Sinal atual</h2>
         <div id="signal-body" class="muted">—</div>
       </section>
+      <section class="card" id="execution-card">
+        <h2>Execução</h2>
+        <div class="exec-controls">
+          <select id="exec-mode" title="Modo de execução">
+            <option value="off">off (só paper)</option>
+            <option value="manual">manual (aprovar)</option>
+            <option value="auto">auto (breaker)</option>
+          </select>
+          <button id="exec-pause">Pausar</button>
+        </div>
+        <div id="execution-body" class="muted">—</div>
+      </section>
       <section class="card" id="radar-card">
         <h2>Radar — oportunidades em formação</h2>
         <div id="radar-list" class="muted">—</div>

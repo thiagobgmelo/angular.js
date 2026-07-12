@@ -304,3 +304,36 @@ runbook em docs/05 com opções de custo zero (Oracle Always Free / Tailscale).
 mesma proteção prática que um sistema de login, com uma fração da superfície
 de ataque. Caddy elimina a gestão manual de certificados. O compose isola o
 app (sem porta pública direta — só o Caddy fala com ele).
+
+---
+
+## ADR-016 — Execução real com modos alternáveis e salvaguardas em camadas (v6)
+
+**Contexto**: o usuário quer executar na Bybit (perpétuos), com confirmação
+manual via Telegram E modo automático com circuit breaker, alternáveis.
+
+**Alternativas**: só automático (sem freio humano no início); só manual
+(não escala); executar dentro do fluxo do sinal (acoplaria decisão e ordem).
+
+**Decisão**: camada `app/execution/` separada da análise:
+- **Executores plugáveis**: `DryRunExecutor` (default sem chaves — simula e
+  audita tudo) e `BybitExecutor` (ccxt, perpétuos USDT, testnet via
+  `BYBIT_TESTNET=1`). A seleção é automática pela presença das chaves no env.
+- **Modos persistidos em runtime** (`off` → `manual` → `auto`): trocáveis por
+  `/modo` no Telegram, API e dashboard, sem restart.
+- **Manual**: sinal vira aprovação pendente com validade (15 min) e botões
+  inline no Telegram + botões no dashboard; decisão é atômica no SQLite
+  (aprovar duas vezes é impossível).
+- **Auto**: protegido por circuit breaker — perda diária máxima (3% do
+  capital), máximo de entradas/dia (6), pausa automática após 3 erros de
+  ordem consecutivos; kill-switch por `/pausar`, API e dashboard.
+- **Ordens bracket**: entrada a mercado + TP1 (50%) e TP2 (25%) reduce-only +
+  stop-market reduce-only; TP1 atingido → stop movido a breakeven na exchange
+  (espelhando a máquina de estados do paper).
+- **Auditoria**: toda ação (real ou dry-run) vai para `execution_log`.
+
+**Porquê**: dinheiro real exige defesa em profundidade: default seguro
+(off/dry-run), freio humano opcional (manual), limites duros (breaker),
+kill-switch remoto, trilha de auditoria e caminho de adoção obrigatório
+paper → testnet → produção pequena. O paper trading continua rodando em
+paralelo como grupo de controle da estratégia.

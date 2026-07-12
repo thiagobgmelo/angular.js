@@ -70,6 +70,17 @@ def validate(cfg: Config) -> None:
     liq_buffer = cfg.get("risk.liq_buffer", 3.0)
     if liq_buffer < 1.5:
         problems.append(f"risk.liq_buffer deve ser >= 1.5; recebido {liq_buffer}")
+    exec_mode = cfg.get("execution.mode", "off")
+    if exec_mode not in ("off", "manual", "auto"):
+        problems.append(f"execution.mode deve ser off|manual|auto; recebido {exec_mode!r}")
+    daily_loss = cfg.get("execution.max_daily_loss_pct", 0.03)
+    if not 0 < daily_loss <= 0.2:
+        problems.append(
+            f"execution.max_daily_loss_pct deve estar em (0, 0.2]; recebido {daily_loss}"
+        )
+    ttl = cfg.get("execution.approval_ttl_min", 15)
+    if ttl < 1:
+        problems.append(f"execution.approval_ttl_min deve ser >= 1; recebido {ttl}")
     if cfg.get("screener.enabled", True):
         max_pairs = cfg.get("screener.max_pairs", 25)
         if not 1 <= max_pairs <= 100:

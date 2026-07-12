@@ -95,6 +95,32 @@ def cmd_backtest(symbol: str, timeframe: str, candles: int = 1500) -> None:
                   f"{t['exit_reason']:<14} pnl {t['pnl']:>10}")
 
 
+def cmd_telegram_test() -> None:
+    """Valida token/chat do Telegram enviando uma mensagem de prova."""
+    from app.alerts import telegram
+
+    if not telegram.is_configured():
+        print("TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID não configurados (.env)")
+        sys.exit(1)
+    ok = telegram.send("✅ Crypto Trader conectado — este chat receberá sinais e aprovações.")
+    print("Mensagem enviada com sucesso!" if ok else "Falhou — confira token/chat id.")
+    sys.exit(0 if ok else 1)
+
+
+def cmd_exec_test() -> None:
+    """Valida as credenciais da exchange de execução (Bybit/dry-run)."""
+    from app.config import db_path as _db_path
+    from app.execution.executors import make_executor
+    from app.paper.store import Store
+
+    cfg = load_config()
+    executor = make_executor(Store(_db_path(cfg)))
+    result = executor.check_connection()
+    print(f"Executor: {executor.name}")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    sys.exit(0 if result.get("ok") else 1)
+
+
 def cmd_serve(port: int = 8000) -> None:
     import os
 
@@ -126,6 +152,10 @@ def main() -> None:
         )
     elif cmd == "serve":
         cmd_serve(int(rest[0]) if rest else 8000)
+    elif cmd == "telegram-test":
+        cmd_telegram_test()
+    elif cmd == "exec-test":
+        cmd_exec_test()
     else:
         print(__doc__)
         sys.exit(1)

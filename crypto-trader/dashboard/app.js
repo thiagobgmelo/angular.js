@@ -307,9 +307,65 @@
     $("portfolio-body").innerHTML = `<table class="mini">${rows}</table>${open}`;
   }
 
+  async function loadExecution() {
+    const st = await api("/api/execution");
+    $("exec-mode").value = st.mode;
+    $("exec-pause").textContent = st.paused ? "Retomar" : "Pausar";
+    const b = st.breaker;
+    const pausedNote = st.paused
+      ? `<span class="paused">⏸ pausada${st.pause_reason ? " — " + esc(st.pause_reason) : ""}</span><br>`
+      : "";
+    const approvals = (st.pending_approvals || []).map((a) =>
+      `<div class="approval">
+        <span class="${a.direction === "long" ? "dir-long" : "dir-short"}">${a.direction === "long" ? "LONG" : "SHORT"}</span>
+        ${esc(a.symbol)} · ${esc(a.timeframe)} · entrada ${fmt(a.entry)} · ${esc(a.suggested_leverage)}x
+        <div class="btns">
+          <button class="ok" data-approval="${esc(a.id)}" data-decision="approve">✓ Aprovar</button>
+          <button class="no" data-approval="${esc(a.id)}" data-decision="reject">✗ Rejeitar</button>
+        </div>
+      </div>`
+    ).join("");
+    $("execution-body").innerHTML =
+      `<div class="exec-status">${pausedNote}` +
+      `Executor: <b>${esc(st.executor)}</b> · Hoje: ${b.entries_today}/${b.max_trades_per_day} entradas · ` +
+      `PnL ${fmt(b.pnl_today)} <span class="muted">(limite −${fmt(b.max_daily_loss)})</span></div>` +
+      (approvals || '<div class="muted" style="margin-top:6px">Sem aprovações pendentes.</div>');
+  }
+
+  $("exec-mode").addEventListener("change", async () => {
+    await api("/api/execution/mode", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: $("exec-mode").value }),
+    });
+    loadExecution();
+  });
+
+  $("exec-pause").addEventListener("click", async () => {
+    const st = await api("/api/execution");
+    await api(st.paused ? "/api/execution/resume" : "/api/execution/pause", { method: "POST" });
+    loadExecution();
+  });
+
+  $("execution-body").addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-approval]");
+    if (!btn) return;
+    btn.disabled = true;
+    try {
+      await api(`/api/approvals/${btn.dataset.approval}/${btn.dataset.decision}`, { method: "POST" });
+    } catch (err) {
+      alert("Aprovação: " + err.message);
+    }
+    loadExecution();
+    loadPortfolio();
+  });
+
   async function refreshAll() {
     try {
-      await Promise.all([loadChart(), loadAnalysis(), loadSignals(), loadPortfolio(), loadRadar()]);
+      await Promise.all([
+        loadChart(), loadAnalysis(), loadSignals(),
+        loadPortfolio(), loadRadar(), loadExecution(),
+      ]);
     } catch (err) {
       $("analysis-box").textContent = "Erro: " + err.message;
     }
@@ -385,6 +441,7 @@
     es.addEventListener("candle", (e) => onCandle(JSON.parse(e.data)));
     es.addEventListener("signal", () => { loadSignals(); loadAnalysis(); loadPortfolio(); loadRadar(); });
     es.addEventListener("position", () => loadPortfolio());
+    es.addEventListener("execution", () => loadExecution());
     es.addEventListener("radar", (e) => {
       const d = JSON.parse(e.data);
       const list = $("radar-list");

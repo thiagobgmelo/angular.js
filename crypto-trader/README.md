@@ -136,6 +136,20 @@ em memória que emite eventos — nada de polling:
 - Sinais recentes e carteira paper (equity, win rate, profit factor, posições)
 - Botão **Escanear tudo** dispara a análise imediata de todos os pares
 
+## Execução real (Bybit perpétuos) e bot do Telegram
+
+- **Modos alternáveis em runtime**: `off` (só paper, default) → `manual`
+  (aprovação com botões no Telegram/dashboard, validade 15 min) → `auto`
+  (circuit breaker: perda diária máx 3%, 6 entradas/dia, pausa em erros).
+  Troque com `/modo` no Telegram, no card Execução ou via API.
+- **Sem chaves = dry-run**: simula as ordens e audita tudo em
+  `execution_log`; com `BYBIT_API_KEY/SECRET` no `.env` vira Bybit real
+  (`BYBIT_TESTNET=1` = sandbox — **valide lá primeiro**).
+- **Bot bidirecional**: `/status`, `/posicoes`, `/radar`, `/modo`, `/pausar`,
+  `/retomar` — só obedece ao `TELEGRAM_CHAT_ID` configurado. Setup guiado em
+  [docs/06-telegram.md](docs/06-telegram.md); valide com
+  `python -m app.main telegram-test` e `python -m app.main exec-test`.
+
 ## Deploy (uso e acesso remoto)
 
 Artefatos prontos: `Dockerfile`, `docker-compose.yml` (app + Caddy com HTTPS

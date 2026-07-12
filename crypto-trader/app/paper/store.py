@@ -54,6 +54,27 @@ CREATE TABLE IF NOT EXISTS equity (
     at TEXT NOT NULL,
     value REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS approvals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id INTEGER REFERENCES signals(id),
+    status TEXT NOT NULL DEFAULT 'pending',  -- pending|approved|rejected|expired
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    decided_at TEXT,
+    decided_via TEXT                          -- telegram|dashboard|timeout
+);
+CREATE TABLE IF NOT EXISTS execution_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT NOT NULL,
+    action TEXT NOT NULL,                     -- entry|tp_orders|stop_order|amend_stop|error|skip
+    symbol TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '{}',
+    ok INTEGER NOT NULL DEFAULT 1
+);
 CREATE TABLE IF NOT EXISTS radar_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
@@ -246,6 +267,129 @@ class Store:
                 (*fields.values(), pos_id),
             )
             self.conn.commit()
+
+    # --- settings (estado runtime persistido: modo de execução, pausa) ---
+    def get_setting(self, key: str, default: str | None = None) -> str | None:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT value FROM settings WHERE key=?", (key,)
+            ).fetchone()
+        return row["value"] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
+            self.conn.commit()
+
+    # --- aprovações (modo manual de execução) ---
+    def create_approval(self, signal_id: int, created_at: str, expires_at: str) -> int:
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO approvals (signal_id, created_at, expires_at) VALUES (?,?,?)",
+                (signal_id, created_at, expires_at),
+            )
+            self.conn.commit()
+            return cur.lastrowid
+
+    def get_approval(self, approval_id: int) -> dict | None:
+        with self._lock:
+            row = self.conn.execute(
+                """SELECT a.*, s.symbol, s.timeframe, s.direction, s.entry, s.stop,
+                          s.targets, s.position_size, s.suggested_leverage
+                   FROM approvals a JOIN signals s ON s.id = a.signal_id
+                   WHERE a.id=?""",
+                (approval_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["targets"] = json.loads(d["targets"])
+        return d
+
+    def pending_approvals(self, now_iso: str) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(
+                """SELECT a.*, s.symbol, s.timeframe, s.direction, s.entry, s.stop,
+                          s.targets, s.position_size, s.suggested_leverage
+                   FROM approvals a JOIN signals s ON s.id = a.signal_id
+                   WHERE a.status='pending' AND a.expires_at > ?
+                   ORDER BY a.id DESC""",
+                (now_iso,),
+            ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["targets"] = json.loads(d["targets"])
+            out.append(d)
+        return out
+
+    def decide_approval(
+        self, approval_id: int, status: str, decided_at: str, via: str
+    ) -> bool:
+        """Decide atomicamente; False se já não estava mais pendente."""
+        with self._lock:
+            cur = self.conn.execute(
+                """UPDATE approvals SET status=?, decided_at=?, decided_via=?
+                   WHERE id=? AND status='pending'""",
+                (status, decided_at, via, approval_id),
+            )
+            self.conn.commit()
+            return cur.rowcount == 1
+
+    def expire_stale_approvals(self, now_iso: str) -> int:
+        with self._lock:
+            cur = self.conn.execute(
+                """UPDATE approvals SET status='expired', decided_via='timeout'
+                   WHERE status='pending' AND expires_at <= ?""",
+                (now_iso,),
+            )
+            self.conn.commit()
+            return cur.rowcount
+
+    # --- log de execução (auditoria de toda ordem, real ou dry-run) ---
+    def log_execution(self, at: str, action: str, symbol: str, detail: dict, ok: bool) -> None:
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO execution_log (at, action, symbol, detail, ok) VALUES (?,?,?,?,?)",
+                (at, action, symbol, json.dumps(detail), int(ok)),
+            )
+            self.conn.commit()
+
+    def execution_log_recent(self, limit: int = 100) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM execution_log ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["detail"] = json.loads(d["detail"])
+            d["ok"] = bool(d["ok"])
+            out.append(d)
+        return out
+
+    def entries_since(self, since_iso: str) -> int:
+        """Quantas entradas reais/dry-run desde o instante dado (circuit breaker)."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) c FROM execution_log WHERE action='entry' AND ok=1 AND at >= ?",
+                (since_iso,),
+            ).fetchone()
+        return int(row["c"])
+
+    def realized_pnl_since(self, since_iso: str) -> float:
+        """PnL realizado das posições fechadas desde o instante (circuit breaker)."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COALESCE(SUM(realized_pnl),0) s FROM positions "
+                "WHERE status='closed' AND closed_at >= ?",
+                (since_iso,),
+            ).fetchone()
+        return float(row["s"])
 
     # --- equity ---
     def record_equity(self, at_iso: str, value: float) -> None:

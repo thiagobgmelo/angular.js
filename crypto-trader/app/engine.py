@@ -12,9 +12,12 @@ import time
 from datetime import UTC, datetime, timedelta
 
 from app.alerts import telegram
+from app.alerts.telegram_bot import TelegramBot
 from app.analysis import strategy
 from app.config import Config, db_path
 from app.data.feed import BaseFeed, timeframe_seconds
+from app.execution.executors import make_executor
+from app.execution.manager import ExecutionManager
 from app.paper.portfolio import PaperPortfolio
 from app.paper.store import Store
 from app.risk.manager import RiskManager
@@ -45,6 +48,11 @@ class TradingEngine:
             "candles_closed": 0, "ticks": 0, "signals": 0,
             "radar_events": 0, "last_analysis_ms": None,
         }
+        # execução real (dry-run sem chaves) + bot bidirecional do Telegram
+        self.execution = ExecutionManager(cfg, self.store, make_executor(self.store))
+        self.bot = TelegramBot(self, self.execution)
+        if self.bot.configured:
+            self.execution.notify = self.bot.send
         feed.on_candle_close(self.handle_candle_close)
         feed.on_tick(self.handle_tick)
 
@@ -106,6 +114,15 @@ class TradingEngine:
             )
             if telegram.is_configured():
                 await asyncio.to_thread(telegram.send, telegram.format_signal(signal_dict))
+            await self._dispatch_execution(signal_dict)
+
+    async def _dispatch_execution(self, sd: dict) -> None:
+        result = await self.execution.handle_signal(sd, sd.get("id", 0))
+        if result["action"] != "off":
+            self.publish({"type": "execution", "execution": {
+                "action": result["action"], "symbol": sd["symbol"],
+                "approval_id": result.get("approval_id"),
+            }})
 
     async def handle_tick(self, symbol: str, price: float, ts_ms: int) -> None:
         self.stats["ticks"] += 1
@@ -114,6 +131,7 @@ class TradingEngine:
         for pos in open_positions:
             if pos["symbol"] != symbol:
                 continue
+            had_tp1 = any(e.get("type") == "tp1" for e in pos["events"])
             updated, changed = await asyncio.to_thread(
                 self.portfolio.update_with_tick, pos, price
             )
@@ -123,6 +141,12 @@ class TradingEngine:
                     "posição %s %s: %s @ %g",
                     updated["id"], symbol, updated["events"][-1]["type"], price,
                 )
+                hit_tp1_now = not had_tp1 and any(
+                    e.get("type") == "tp1" for e in updated["events"]
+                )
+                if hit_tp1_now and updated["status"] == "open":
+                    # espelha o breakeven na exchange (modo manual/auto)
+                    await self.execution.on_breakeven(symbol, updated["entry"])
 
     # --- análise (roda em thread; usa apenas o cache do feed) ---
     def _analyze_pair(self, symbol: str, timeframe: str) -> tuple[dict | None, dict | None]:
@@ -155,6 +179,7 @@ class TradingEngine:
             sized.context = context
             sd = sized.to_dict()
             signal_id = self.store.save_signal(sd)
+            sd["id"] = signal_id
             self.portfolio.open_from_signal(signal_id, sd)
             promo_since = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
             promoted = self.store.promote_radar_events(
@@ -217,6 +242,7 @@ class TradingEngine:
                 if sd is not None:
                     self.publish({"type": "signal", "signal": sd})
                     new_signals.append(sd)
+                    await self._dispatch_execution(sd)
         return new_signals
 
     # --- universo dinâmico (screener) ---
@@ -274,8 +300,25 @@ class TradingEngine:
             self._refresh_task = None
 
     def health(self) -> dict:
-        return {"feed": self.feed.health(), "engine": dict(self.stats),
-                "sse_subscribers": len(self._subscribers)}
+        return {
+            "feed": self.feed.health(),
+            "engine": dict(self.stats),
+            "sse_subscribers": len(self._subscribers),
+            "execution": {
+                "mode": self.execution.mode,
+                "paused": self.execution.paused,
+                "executor": self.execution.executor.name,
+            },
+        }
+
+    def start_services(self) -> None:
+        """Serviços de fundo além do feed: refresh do universo + bot Telegram."""
+        self.start_refresh_loop()
+        self.bot.start()
+
+    async def stop_services(self) -> None:
+        await self.stop_refresh_loop()
+        await self.bot.stop()
 
 
 def _position_event(pos: dict) -> dict:
@@ -308,8 +351,11 @@ async def run_live(cfg: Config) -> None:
     """Modo `watch`: feed + engine rodando em primeiro plano."""
     feed, engine = await asyncio.to_thread(build_live_components, cfg)
     await feed.start()
-    engine.start_refresh_loop()
-    log.info("Engine ao vivo com %d pares — Ctrl+C para sair", len(feed.pairs))
+    engine.start_services()
+    log.info(
+        "Engine ao vivo com %d pares (execução: %s/%s) — Ctrl+C para sair",
+        len(feed.pairs), engine.execution.mode, engine.execution.executor.name,
+    )
     try:
         while True:
             await asyncio.sleep(60)
@@ -322,5 +368,5 @@ async def run_live(cfg: Config) -> None:
                 health["engine"]["signals"],
             )
     finally:
-        await engine.stop_refresh_loop()
+        await engine.stop_services()
         await feed.stop()

@@ -55,6 +55,13 @@ risk:
 radar:
   min_score: 3             # score mínimo para aviso de oportunidade em formação
 
+execution:                 # execução real (Bybit perpétuos; dry-run sem chaves)
+  mode: "off"              # off | manual | auto — alternável em runtime (/modo, API)
+  approval_ttl_min: 15     # validade da aprovação no modo manual
+  max_daily_loss_pct: 0.03 # circuit breaker: perda diária máx (% do capital)
+  max_trades_per_day: 6    # circuit breaker: entradas máximas por dia
+  max_consecutive_errors: 3  # pausa automática após N erros de ordem seguidos
+
 paper:
   db_path: paper_trading.db
 
