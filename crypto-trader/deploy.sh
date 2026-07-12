@@ -33,6 +33,16 @@ if command -v ufw >/dev/null 2>&1; then
   ok "UFW ativo com 22/80/443"
 fi
 
+# Oracle Cloud: as imagens Ubuntu vêm com regras REJECT no iptables que
+# bloqueiam 80/443 mesmo com o Security List liberado no painel
+if sudo iptables -L INPUT -n 2>/dev/null | grep -q "REJECT"; then
+  say "Firewall iptables da imagem detectado (padrão Oracle) — liberando 80/443..."
+  sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT
+  sudo iptables -I INPUT -p tcp --dport 443 -j ACCEPT
+  sudo netfilter-persistent save 2>/dev/null || true
+  ok "iptables liberado para 80/443"
+fi
+
 # --- 3. .env interativo ------------------------------------------------------
 if [ ! -f .env ]; then
   say "Configurando o .env (Enter aceita o padrão)..."
