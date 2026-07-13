@@ -143,8 +143,12 @@ em memória que emite eventos — nada de polling:
   (circuit breaker: perda diária máx 3%, 6 entradas/dia, pausa em erros).
   Troque com `/modo` no Telegram, no card Execução ou via API.
 - **Sem chaves = dry-run**: simula as ordens e audita tudo em
-  `execution_log`; com `BYBIT_API_KEY/SECRET` no `.env` vira Bybit real
-  (`BYBIT_TESTNET=1` = sandbox — **valide lá primeiro**).
+  `execution_log`; com `BYBIT_API_KEY/SECRET` no `.env` conecta na Bybit.
+  Valide sempre num ambiente de teste primeiro — `BYBIT_DEMO=1` usa o **Demo
+  Trading** (`api-demo.bybit.com`, mesma UTA do site real, mais fiel à
+  produção; **recomendado**) e `BYBIT_TESTNET=1` usa o **testnet.bybit.com**
+  (sandbox à parte). A chave precisa ter sido criada no mesmo ambiente. Para
+  dinheiro real: os dois flags em `0`.
 - **Bot bidirecional**: `/status`, `/posicoes`, `/radar`, `/modo`, `/pausar`,
   `/retomar` — só obedece ao `TELEGRAM_CHAT_ID` configurado. Setup guiado em
   [docs/06-telegram.md](docs/06-telegram.md); valide com

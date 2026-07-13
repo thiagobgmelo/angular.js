@@ -189,6 +189,7 @@ def test_bybit_executor_order_mapping(store, monkeypatch):
     executor.store = store
     executor.exchange = FakeBybit()
     executor.testnet = True
+    executor.demo = False
     executor._stop_order_ids = {}
 
     result = executor.execute_signal(sd(direction="short"))
@@ -202,3 +203,27 @@ def test_bybit_executor_order_mapping(store, monkeypatch):
     assert stop[6]["triggerPrice"] == 95.0 and stop[6]["reduceOnly"]
     assert ("set_leverage", 5, "BTC/USDT:USDT") in executor.exchange.calls
     assert executor._stop_order_ids["BTC/USDT:USDT"] == "ord4"
+
+
+def test_bybit_mode_property():
+    """mode reflete demo/testnet/produção; demo tem precedência sobre testnet."""
+    ex = BybitExecutor.__new__(BybitExecutor)
+    ex.demo, ex.testnet = True, True
+    assert ex.mode == "demo"
+    ex.demo, ex.testnet = False, True
+    assert ex.mode == "testnet"
+    ex.demo, ex.testnet = False, False
+    assert ex.mode == "PRODUÇÃO"
+
+
+def test_make_executor_demo(store, monkeypatch):
+    """BYBIT_DEMO=1 com chaves → BybitExecutor em modo demo (precede testnet)."""
+    from app.execution.executors import make_executor
+
+    monkeypatch.setenv("BYBIT_API_KEY", "k")
+    monkeypatch.setenv("BYBIT_API_SECRET", "s")
+    monkeypatch.setenv("BYBIT_DEMO", "1")
+    monkeypatch.setenv("BYBIT_TESTNET", "1")
+    executor = make_executor(store)
+    assert isinstance(executor, BybitExecutor)
+    assert executor.mode == "demo"

@@ -7,9 +7,13 @@ Contrato comum:
 - amend_stop(symbol, price): move o stop (ex.: breakeven após TP1)
 - check_connection(): valida credenciais/saldo sem enviar ordem
 
-Segurança: chaves SÓ via env (BYBIT_API_KEY/SECRET); BYBIT_TESTNET=1 usa o
-sandbox. Recomendação obrigatória para produção: chave sem permissão de
-saque e com whitelist de IP.
+Ambientes de teste (nunca misturam chaves):
+- BYBIT_DEMO=1  → Demo Trading (api-demo.bybit.com), na mesma infraestrutura
+  do site real (mesma UTA) — o mais fiel à produção; tem precedência.
+- BYBIT_TESTNET=1 → testnet.bybit.com (sandbox à parte, com faucet próprio).
+
+Segurança: chaves SÓ via env (BYBIT_API_KEY/SECRET). Recomendação obrigatória
+para produção: chave sem permissão de saque e com whitelist de IP.
 """
 from __future__ import annotations
 
@@ -85,7 +89,14 @@ class BybitExecutor:
 
     name = "bybit"
 
-    def __init__(self, store, api_key: str, api_secret: str, testnet: bool = True):
+    def __init__(
+        self,
+        store,
+        api_key: str,
+        api_secret: str,
+        testnet: bool = True,
+        demo: bool = False,
+    ):
         import ccxt  # noqa: PLC0415
 
         self.store = store
@@ -95,18 +106,34 @@ class BybitExecutor:
             "enableRateLimit": True,
             "options": {"defaultType": "swap"},
         })
-        if testnet:
+        # Demo Trading (api-demo.bybit.com) roda na mesma infraestrutura do
+        # site real (mesma UTA) — mais fiel à produção que o testnet. Tem
+        # precedência sobre o testnet quando ambos estão ligados.
+        if demo:
+            self.exchange.enable_demo_trading(True)
+        elif testnet:
             self.exchange.set_sandbox_mode(True)
-        self.testnet = testnet
+        self.demo = demo
+        self.testnet = testnet and not demo
         self._stop_order_ids: dict[str, str] = {}
+
+    @property
+    def mode(self) -> str:
+        if self.demo:
+            return "demo"
+        return "testnet" if self.testnet else "PRODUÇÃO"
 
     def check_connection(self) -> dict:
         try:
             balance = self.exchange.fetch_balance()
-            usdt = balance.get("USDT", {}).get("free")
+            usdt_info = balance.get("USDT", {})
+            # em UTA o saldo negociável às vezes vem em 'free' None e só em 'total'
+            usdt = usdt_info.get("free")
+            if usdt is None:
+                usdt = usdt_info.get("total")
             return {
                 "ok": True,
-                "mode": "testnet" if self.testnet else "PRODUÇÃO",
+                "mode": self.mode,
                 "usdt_free": usdt,
             }
         except Exception as err:
@@ -143,11 +170,11 @@ class BybitExecutor:
                 "leverage": lev, "qty": qty,
                 "entry_id": entry.get("id"), "tp1_id": tp1.get("id"),
                 "tp2_id": tp2.get("id"), "stop_id": stop.get("id"),
-                "testnet": self.testnet,
+                "mode": self.mode,
             }
             self.store.log_execution(_now(), "entry", symbol, detail, True)
-            log.info("BYBIT %s %s qty=%s lev=%sx (testnet=%s)",
-                     side.upper(), symbol, qty, lev, self.testnet)
+            log.info("BYBIT %s %s qty=%s lev=%sx (modo=%s)",
+                     side.upper(), symbol, qty, lev, self.mode)
             return {"ok": True, **detail}
         except Exception as err:
             self.store.log_execution(_now(), "error", symbol, {"error": str(err)}, False)
@@ -185,8 +212,9 @@ def make_executor(store):
     key = os.environ.get("BYBIT_API_KEY", "")
     secret = os.environ.get("BYBIT_API_SECRET", "")
     if key and secret:
+        demo = os.environ.get("BYBIT_DEMO", "0") == "1"
         testnet = os.environ.get("BYBIT_TESTNET", "1") != "0"
-        if not testnet:
+        if not demo and not testnet:
             log.warning("BYBIT EM MODO PRODUÇÃO — ordens reais serão enviadas")
-        return BybitExecutor(store, key, secret, testnet=testnet)
+        return BybitExecutor(store, key, secret, testnet=testnet, demo=demo)
     return DryRunExecutor(store)
