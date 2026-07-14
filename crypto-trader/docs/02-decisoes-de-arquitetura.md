@@ -337,3 +337,44 @@ manual via Telegram E modo automático com circuit breaker, alternáveis.
 kill-switch remoto, trilha de auditoria e caminho de adoção obrigatório
 paper → testnet → produção pequena. O paper trading continua rodando em
 paralelo como grupo de controle da estratégia.
+
+## ADR-017 — Dashboard como grid de widgets (GridStack.js vendorizado) (v7)
+
+**Contexto**: com o sistema operacional validado de ponta a ponta, o usuário
+pediu personalização do dashboard: cards arrastáveis e redimensionáveis como
+widgets de home screen de celular (matriz de blocos derivada da resolução), e
+"Sinais recentes" como carousel horizontal logo abaixo do painel de critérios,
+com o sinal mais novo entrando à esquerda e destacado.
+
+**Alternativas**: implementar drag/resize/colisão à mão (reinventa um
+subsistema inteiro: colisão, touch, breakpoints, serialização);
+Interact.js (só primitivas, sem modelo de grid); Muuri/SortableJS (reordenam,
+mas não têm "ocupar N blocos" redimensionável).
+
+**Decisão**: vendorizar **GridStack.js 10.3.1** (vanilla, MIT, zero
+dependências) em `dashboard/vendor/`, no mesmo padrão do Lightweight Charts —
+sem CDN, sem bundler. Todos os 6 cards (incluindo o do gráfico, que já usa
+`autoSize`/ResizeObserver) viram widgets do mesmo grid:
+
+- **Blocos**: colunas por breakpoint de largura (12 / 8 ≤1600px / 6 ≤1200px /
+  4 ≤900px, via `columnOpts.breakpoints`) e `cellHeight` fixo de 80px — como
+  home screen: largura adapta, altura por bloco é constante e a página rola.
+- **Persistência**: layout (`grid.save()`) no `localStorage`
+  (`dashboard_layout_v1`), com debounce de 400 ms no evento `change`;
+  restauração validada contra whitelist dos 6 ids — qualquer divergência
+  descarta o salvo e volta ao default declarado nos atributos `gs-*` do HTML.
+- **Carousel**: variante CSS escopada (`.signals-carousel`) — flex horizontal
+  com scroll-snap; `.sig` global (usado no sinal atual e no portfólio)
+  intocado. Mais recente = índice 0 (API já ordena `id DESC`), classe
+  `sig--latest` (borda acento + selo) e flash de animação só quando o id do
+  topo muda de fato.
+
+**Porquê**: a lib resolve exatamente o modelo pedido (matriz + colisão +
+touch + serialização) com custo de peso equivalente ao que o projeto já
+vendoriza; o fallback por whitelist garante que um localStorage corrompido
+nunca quebre o dashboard.
+
+**Pegadinha registrada**: a CSS base do GridStack só cobre 1 e 12 colunas —
+os breakpoints intermediários exigem `gridstack-extra.min.css` (2–11
+colunas). Sem ela, os widgets ficam com `width: 0` ao cruzar um breakpoint
+(tela "vazia"). Descoberto no e2e de responsividade com Playwright.

@@ -14,6 +14,58 @@
     const digits = d ?? (Math.abs(n) >= 1000 ? 2 : Math.abs(n) >= 1 ? 4 : 6);
     return n.toLocaleString("pt-BR", { maximumFractionDigits: digits });
   };
+  const debounce = (fn, ms) => {
+    let t;
+    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+  };
+
+  // ---------- grid de widgets arrastável/redimensionável ----------
+  const LAYOUT_KEY = "dashboard_layout_v1";
+  const WIDGET_IDS = [
+    "chart-panel", "signals-card", "signal-card",
+    "execution-card", "radar-card", "portfolio-card",
+  ];
+
+  function initGrid() {
+    const grid = GridStack.init({
+      // colunas por breakpoint = "max-width": a maior faixa sem breakpoint
+      // (> 1600px) usa o `column` base (12); as demais usam o `c` do
+      // primeiro limiar (ordenado do maior pro menor `w`) que a largura atual
+      // ainda satisfaz.
+      column: 12,
+      columnOpts: {
+        breakpoints: [
+          { w: 1600, c: 8 },
+          { w: 1200, c: 6 },
+          { w: 900, c: 4 },
+        ],
+      },
+      cellHeight: 80,
+      margin: 6,
+      float: false,
+      animate: true,
+    }, "#dashboard-grid");
+
+    try {
+      const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "null");
+      const valid = Array.isArray(saved)
+        && saved.length === WIDGET_IDS.length
+        && saved.every((n) => n && WIDGET_IDS.includes(n.id));
+      if (valid) grid.load(saved);
+    } catch (_) { /* layout salvo corrompido: mantém o default do HTML */ }
+
+    const saveLayout = debounce(() => {
+      try {
+        localStorage.setItem(LAYOUT_KEY, JSON.stringify(grid.save(false)));
+      } catch (_) { /* localStorage indisponível/cheio: ignora */ }
+    }, 400);
+    grid.on("change", saveLayout);
+    return grid;
+  }
+
+  // aplica o layout de grid antes de criar o gráfico, para que #chart já
+  // tenha uma largura/altura reais na primeira medição do autoSize
+  initGrid();
 
   // ---------- gráfico ----------
   const chartEl = $("chart");
@@ -195,7 +247,7 @@
       : "");
   }
 
-  function signalHtml(s, withRationale) {
+  function signalHtml(s, withRationale, extraClass) {
     const dirClass = s.direction === "long" ? "dir-long" : "dir-short";
     const dirLabel = s.direction === "long" ? "LONG ▲" : "SHORT ▼";
     const kind = s.trade_type === "swing" ? "Swing" : "Day trade";
@@ -215,7 +267,7 @@
         `margem ~${fmt(s.margin_required)} USDT · liq. est. ${fmt(s.liquidation_price_est)}<br>` +
         `<span class="muted">${esc(s.leverage_rationale || "")}</span></div>`
       : "";
-    return `<div class="sig">
+    return `<div class="sig${extraClass ? " " + extraClass : ""}">
       <div class="head"><span class="${dirClass}">${dirLabel}</span>
         <span>${esc(s.symbol)} · ${esc(s.timeframe)} · ${kind} · ${esc(s.score)}/${esc(s.max_score)}</span></div>
       <div class="lvls">Entrada ${fmt(s.entry)} · Stop ${fmt(s.stop)} <span class="muted">(${stopPct.toFixed(1)}%)</span><br>
@@ -274,11 +326,21 @@
     refreshAll();
   });
 
+  let lastTopSignalId = null;
+
   async function loadSignals() {
     const rows = await api("/api/signals?limit=12");
-    $("signals-list").innerHTML = rows.length
-      ? rows.map((s) => signalHtml(s, false)).join("")
+    const topId = rows.length ? rows[0].id : null;
+    const isNew = topId != null && topId !== lastTopSignalId;
+    lastTopSignalId = topId;
+    const list = $("signals-list");
+    list.innerHTML = rows.length
+      ? rows.map((s, i) => {
+          const extra = i === 0 ? "sig--latest" + (isNew ? " sig--flash" : "") : "";
+          return signalHtml(s, false, extra);
+        }).join("")
       : '<span class="muted">Nenhum sinal registrado ainda.</span>';
+    list.scrollLeft = 0; // o mais recente entra sempre mais à esquerda
   }
 
   async function loadPortfolio() {

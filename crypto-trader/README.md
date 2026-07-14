@@ -122,6 +122,11 @@ em memória que emite eventos — nada de polling:
 
 `python -m app.main serve` e abra <http://localhost:8000>:
 
+- **Widgets arrastáveis e redimensionáveis** (GridStack): cada card ocupa
+  "blocos" numa matriz que se adapta à resolução (12/8/6/4 colunas) — arraste
+  pelo card e estique pelas bordas; o layout fica salvo no navegador
+- **Sinais recentes em carousel horizontal** abaixo do painel de critérios —
+  o mais novo entra à esquerda com selo "mais recente" e flash de destaque
 - Gráfico com o **cenário completo**: EMAs, zonas de S/R, níveis de Fibonacci,
   marcador do padrão de candle e níveis do sinal (entrada, stop, TP1–3, liq.)
 - **Checklist dos 7 critérios** com ✓/✗ por lado e a leitura de cada um —

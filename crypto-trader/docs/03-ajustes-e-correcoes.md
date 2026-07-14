@@ -108,3 +108,41 @@ Ajustes menores durante a implementação:
   qualquer automação de browser contra o dashboard.
 - Suíte final: **54 testes**; comandos batch (`scan`/`analyze`/`backtest`)
   preservados sobre REST simples.
+
+## Iteração 7 — Dashboard: widgets arrastáveis + carousel de sinais
+
+Pedido do usuário: cards reorganizáveis como widgets de celular (arrastar e
+escolher quantos "blocos" cada um ocupa) e "Sinais recentes" como carousel
+horizontal abaixo do painel de critérios, com o mais novo entrando sempre à
+esquerda e sinalizado. Decisão e desenho no
+[ADR-017](02-decisoes-de-arquitetura.md#adr-017--dashboard-como-grid-de-widgets-gridstackjs-vendorizado-v7).
+
+- `dashboard/vendor/`: GridStack.js 10.3.1 vendorizado (`gridstack-all.js`,
+  `gridstack.min.css`, `gridstack-extra.min.css`).
+- `dashboard/index.html`: 6 widgets `.grid-stack-item` com layout padrão em
+  atributos `gs-*`; "Sinais recentes" nasce abaixo do gráfico+critérios.
+- `dashboard/app.js`: `initGrid()` (breakpoints 12/8/6/4 colunas, célula
+  80px), persistência em `localStorage` com validação por whitelist e
+  debounce; `loadSignals()` marca `sig--latest`/`sig--flash` e reseta o
+  scroll horizontal.
+- `dashboard/style.css`: cards preenchendo 100% do widget (flex coluna),
+  `#chart` fluido (era 440px fixo), variante `.signals-carousel` com
+  scroll-snap, selo "mais recente" e animação de flash.
+
+Correções durante o e2e (Playwright, modo demo):
+- **Breakpoints do GridStack são "max-width"**: a lista `{w, c}` casa quando
+  `largura ≤ w` (ordenada da maior pra menor) — a faixa acima do maior `w`
+  usa o `column` base. A primeira configuração (com `w:0` como "resto")
+  nunca ativava o tier de 4 colunas.
+- **`gridstack-extra.min.css` é obrigatória** para 2–11 colunas: sem ela os
+  widgets colapsam para `width: 0` ao cruzar um breakpoint (tela vazia nos
+  screenshots de 700–1300px). A CSS base só cobre 1 e 12 colunas.
+- `gs-id` (atributo próprio do GridStack) adicionado além do `id` do DOM —
+  é ele que o `grid.save()`/`grid.load()` usa para casar widgets com o
+  layout salvo.
+
+Validação: script Playwright cobrindo posição padrão, drag, resize,
+persistência após reload, fallback com layout corrompido (sem erros de
+console), carousel (flex + overflow + destaque no índice 0 + scroll zerado)
+e responsividade em 2000/1300/1000/700px (12/8/6/4 colunas). Suíte pytest e
+ruff sem regressões (backend intocado).

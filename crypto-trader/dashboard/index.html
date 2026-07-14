@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <title>Crypto Trader — Análise Técnica</title>
+  <link rel="stylesheet" href="/static/vendor/gridstack.min.css">
+  <link rel="stylesheet" href="/static/vendor/gridstack-extra.min.css">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -21,50 +23,79 @@
   </header>
 
   <main>
-    <section class="chart-panel">
-      <div id="chart"></div>
-      <div class="chart-legend" id="chart-legend">
-        <span class="key"><i class="swatch" style="background:#3987e5"></i>EMA 50</span>
-        <span class="key"><i class="swatch" style="background:#c98500"></i>EMA 200</span>
-        <span class="key"><i class="dash" style="border-color:#e66767"></i>Stop</span>
-        <span class="key"><i class="dash" style="border-color:#199e70"></i>Alvos</span>
-      </div>
-      <div class="analysis-box" id="analysis-box">Carregando análise…</div>
-    </section>
-
-    <aside class="side-panel">
-      <section class="card" id="signal-card">
-        <h2>Sinal atual</h2>
-        <div id="signal-body" class="muted">—</div>
-      </section>
-      <section class="card" id="execution-card">
-        <h2>Execução</h2>
-        <div class="exec-controls">
-          <select id="exec-mode" title="Modo de execução">
-            <option value="off">off (só paper)</option>
-            <option value="manual">manual (aprovar)</option>
-            <option value="auto">auto (breaker)</option>
-          </select>
-          <button id="exec-pause">Pausar</button>
+    <div class="grid-stack" id="dashboard-grid">
+      <div class="grid-stack-item" id="chart-panel" gs-id="chart-panel" gs-x="0" gs-y="0" gs-w="8" gs-h="7" gs-min-w="4" gs-min-h="4">
+        <div class="grid-stack-item-content">
+          <section class="chart-panel">
+            <div id="chart"></div>
+            <div class="chart-legend" id="chart-legend">
+              <span class="key"><i class="swatch" style="background:#3987e5"></i>EMA 50</span>
+              <span class="key"><i class="swatch" style="background:#c98500"></i>EMA 200</span>
+              <span class="key"><i class="dash" style="border-color:#e66767"></i>Stop</span>
+              <span class="key"><i class="dash" style="border-color:#199e70"></i>Alvos</span>
+            </div>
+            <div class="analysis-box" id="analysis-box">Carregando análise…</div>
+          </section>
         </div>
-        <div id="execution-body" class="muted">—</div>
-      </section>
-      <section class="card" id="radar-card">
-        <h2>Radar — oportunidades em formação</h2>
-        <div id="radar-list" class="muted">—</div>
-      </section>
-      <section class="card">
-        <h2>Sinais recentes</h2>
-        <div id="signals-list" class="muted">—</div>
-      </section>
-      <section class="card">
-        <h2>Carteira paper</h2>
-        <div id="portfolio-body" class="muted">—</div>
-      </section>
-    </aside>
+      </div>
+
+      <div class="grid-stack-item" id="signals-card" gs-id="signals-card" gs-x="0" gs-y="7" gs-w="8" gs-h="3" gs-min-w="3" gs-min-h="2">
+        <div class="grid-stack-item-content">
+          <section class="card">
+            <h2>Sinais recentes</h2>
+            <div id="signals-list" class="muted signals-carousel">—</div>
+          </section>
+        </div>
+      </div>
+
+      <div class="grid-stack-item" id="signal-card" gs-id="signal-card" gs-x="8" gs-y="0" gs-w="4" gs-h="3" gs-min-w="2" gs-min-h="2">
+        <div class="grid-stack-item-content">
+          <section class="card">
+            <h2>Sinal atual</h2>
+            <div id="signal-body" class="muted">—</div>
+          </section>
+        </div>
+      </div>
+
+      <div class="grid-stack-item" id="execution-card" gs-id="execution-card" gs-x="8" gs-y="3" gs-w="4" gs-h="4" gs-min-w="2" gs-min-h="2">
+        <div class="grid-stack-item-content">
+          <section class="card">
+            <h2>Execução</h2>
+            <div class="exec-controls">
+              <select id="exec-mode" title="Modo de execução">
+                <option value="off">off (só paper)</option>
+                <option value="manual">manual (aprovar)</option>
+                <option value="auto">auto (breaker)</option>
+              </select>
+              <button id="exec-pause">Pausar</button>
+            </div>
+            <div id="execution-body" class="muted">—</div>
+          </section>
+        </div>
+      </div>
+
+      <div class="grid-stack-item" id="radar-card" gs-id="radar-card" gs-x="8" gs-y="7" gs-w="4" gs-h="4" gs-min-w="2" gs-min-h="2">
+        <div class="grid-stack-item-content">
+          <section class="card">
+            <h2>Radar — oportunidades em formação</h2>
+            <div id="radar-list" class="muted">—</div>
+          </section>
+        </div>
+      </div>
+
+      <div class="grid-stack-item" id="portfolio-card" gs-id="portfolio-card" gs-x="0" gs-y="11" gs-w="12" gs-h="4" gs-min-w="3" gs-min-h="2">
+        <div class="grid-stack-item-content">
+          <section class="card">
+            <h2>Carteira paper</h2>
+            <div id="portfolio-body" class="muted">—</div>
+          </section>
+        </div>
+      </div>
+    </div>
   </main>
 
   <script src="/static/vendor/lightweight-charts.js"></script>
+  <script src="/static/vendor/gridstack-all.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>
